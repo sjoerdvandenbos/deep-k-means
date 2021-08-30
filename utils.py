@@ -6,9 +6,10 @@ __license__ = "GPL"
 import numpy as np
 import os
 import tensorflow as tf
-from sklearn.utils.linear_assignment_ import linear_assignment
+from scipy.optimize import linear_sum_assignment as linear_assignment
 
 TF_FLOAT_TYPE = tf.float32
+
 
 def cluster_acc(y_true, y_pred):
     """
@@ -29,6 +30,7 @@ def cluster_acc(y_true, y_pred):
     ind = linear_assignment(w.max() - w) # Optimal label mapping based on the Hungarian algorithm
 
     return sum([w[i, j] for i, j in ind]) * 1.0 / y_pred.size
+
 
 def next_batch(num, data):
     """
@@ -53,6 +55,7 @@ def shuffle(data, target):
 
     return shuffled_data, shuffled_labels, indices
 
+
 def read_list(file_name, type='int'):
     with open(file_name, 'r') as f:
         lines = f.readlines()
@@ -65,6 +68,7 @@ def read_list(file_name, type='int'):
     else:
         print("Unknown type")
         return None
+
 
 def write_list(file_name, array):
     os.makedirs(os.path.dirname(file_name), exist_ok=True)

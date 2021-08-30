@@ -12,7 +12,6 @@ from sklearn.metrics.cluster import adjusted_rand_score
 from sklearn.metrics.cluster import normalized_mutual_info_score
 from sklearn.cluster import KMeans
 from utils import cluster_acc
-from utils import next_batch
 from compgraph import DkmCompGraph
 
 parser = argparse.ArgumentParser(description="Deep k-means algorithm")
@@ -33,6 +32,11 @@ parser.add_argument("-f", "--f_epochs", type=int, default=5, help="Number of fin
 parser.add_argument("-b", "--batch_size", type=int, default=256, help="Size of the minibatches used by the optimizer")
 args = parser.parse_args()
 
+if args.dataset == "PTB":
+    from ptb_utils import next_batch
+else:
+    from utils import next_batch
+
 # Dataset setting from arguments
 if args.dataset == "USPS":
     import usps_specs as specs
@@ -42,6 +46,8 @@ elif args.dataset == "20NEWS":
     import _20news_specs as specs
 elif args.dataset == "RCV1":
     import rcv1_specs as specs
+elif args.dataset == "PTB":
+    import ptb_specs as specs
 else:
     parser.error("Unknown dataset!")
     exit()
@@ -91,8 +97,8 @@ data = specs.data
 # Hardware specifications
 if args.cpu:
     os.environ['CUDA_VISIBLE_DEVICES'] = '-1' # Run on CPU instead of GPU if batch_size is small
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.05)
-config = tf.ConfigProto(gpu_options=gpu_options)
+gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.05)
+config = tf.compat.v1.ConfigProto(gpu_options=gpu_options)
 
 # Definition of the randomly-drawn (0-10000) seeds to be used for each run
 seeds = [8905, 9129, 291, 4012, 1256, 6819, 4678, 6971, 1362, 575]
@@ -113,8 +119,8 @@ n_runs = 10
 for run in range(n_runs):
     # Use a fixed seed for this run, as defined in the seed list
     if seeded:
-        tf.reset_default_graph()
-        tf.set_random_seed(seeds[run])
+        tf.compat.v1.reset_default_graph()
+        tf.compat.v1.set_random_seed(seeds[run])
         np.random.seed(seeds[run])
 
     print("Run", run)
@@ -123,9 +129,9 @@ for run in range(n_runs):
     cg = DkmCompGraph([specs.dimensions, specs.activations, specs.names], specs.n_clusters, lambda_)
 
     # Run the computation graph
-    with tf.Session(config=config) as sess:
+    with tf.compat.v1.Session(config=config) as sess:
         # Initialization
-        init = tf.global_variables_initializer()
+        init = tf.compat.v1.global_variables_initializer()
         sess.run(init)
 
         # Variables to save tensor content
@@ -192,7 +198,7 @@ for run in range(n_runs):
                 print("NMI", nmi)
 
             # The cluster centers are used to initialize the cluster representatives in DKM
-            sess.run(tf.assign(cg.cluster_rep, kmeans_model.cluster_centers_))
+            sess.run(tf.compat.v1.assign(cg.cluster_rep, kmeans_model.cluster_centers_))
 
         # Train the full DKM model
         if (len(alphas) > 0):

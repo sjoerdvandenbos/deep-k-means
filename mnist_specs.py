@@ -5,10 +5,10 @@ __license__ = "GPL"
 
 import tensorflow as tf
 from utils import read_list
-from sklearn.datasets import fetch_mldata
+from sklearn.datasets import fetch_openml
 
 # Fetch the dataset
-dataset = fetch_mldata("MNIST original")
+dataset = fetch_openml("mnist_784")
 print("Dataset MNIST loaded...")
 data = dataset.data
 target = dataset.target

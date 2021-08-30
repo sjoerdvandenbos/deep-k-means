@@ -6,10 +6,14 @@ __license__ = "GPL"
 import tensorflow as tf
 from utils import TF_FLOAT_TYPE
 
+
+tf.compat.v1.disable_eager_execution()
+
+
 def fc_layers(input, specs):
     [dimensions, activations, names] = specs
     for dimension, activation, name in zip(dimensions, activations, names):
-        input = tf.layers.dense(inputs=input, units=dimension, activation=activation, name=name, reuse=tf.AUTO_REUSE)
+        input = tf.compat.v1.layers.dense(inputs=input, units=dimension, activation=activation, name=name, reuse=tf.compat.v1.AUTO_REUSE)
     return input
 
 def autoencoder(input, specs):
@@ -38,7 +42,7 @@ class DkmCompGraph(object):
         embedding_size = ae_specs[0][int((len(ae_specs[0])-1)/2)]
 
         # Placeholder tensor for input data
-        self.input = tf.placeholder(dtype=TF_FLOAT_TYPE, shape=(None, input_size))
+        self.input = tf.compat.v1.placeholder(dtype=TF_FLOAT_TYPE, shape=(None, input_size))
 
         # Auto-encoder loss computations
         self.embedding, self.output = autoencoder(self.input, ae_specs)  # Get the auto-encoder's embedding and output
@@ -47,7 +51,7 @@ class DkmCompGraph(object):
         # k-Means loss computations
         ## Tensor for cluster representatives
         minval_rep, maxval_rep = -1, 1
-        self.cluster_rep = tf.Variable(tf.random_uniform([n_clusters, embedding_size],
+        self.cluster_rep = tf.Variable(tf.compat.v1.random_uniform([n_clusters, embedding_size],
                                                     minval=minval_rep, maxval=maxval_rep,
                                                     dtype=TF_FLOAT_TYPE), name='cluster_rep', dtype=TF_FLOAT_TYPE)
 
@@ -62,7 +66,7 @@ class DkmCompGraph(object):
         min_dist = tf.reduce_min(list_dist, axis=0)
 
         ## Third, compute exponentials shifted with min_dist to avoid underflow (0/0) issues in softmaxes
-        self.alpha = tf.placeholder(dtype=TF_FLOAT_TYPE, shape=())  # Placeholder tensor for alpha
+        self.alpha = tf.compat.v1.placeholder(dtype=TF_FLOAT_TYPE, shape=())  # Placeholder tensor for alpha
         list_exp = []
         for i in range(n_clusters):
             exp = tf.exp(-self.alpha * (self.stack_dist[i] - min_dist))
@@ -86,7 +90,7 @@ class DkmCompGraph(object):
         self.loss = self.ae_loss + val_lambda * self.kmeans_loss
 
         # The optimizer is defined to minimize this loss
-        optimizer = tf.train.AdamOptimizer()
+        optimizer = tf.compat.v1.train.AdamOptimizer()
         self.pretrain_op = optimizer.minimize(self.ae_loss) # Pretrain the autoencoder before starting DKM
         self.train_op = optimizer.minimize(self.loss) # Train the whole DKM model
 
@@ -98,7 +102,7 @@ class AeCompGraph(object):
         input_size = ae_specs[0][-1]
 
         # Placeholder tensor for input data
-        self.input = tf.placeholder(dtype=TF_FLOAT_TYPE, shape=(None, input_size))
+        self.input = tf.compat.v1.placeholder(dtype=TF_FLOAT_TYPE, shape=(None, input_size))
 
         # Auto-encoder loss computations
         self.embedding, self.output = autoencoder(self.input, ae_specs)  # Get the auto-encoder's embedding and output
@@ -108,7 +112,7 @@ class AeCompGraph(object):
         self.loss = tf.reduce_mean(rec_error)
 
         # The optimizer is defined to minimize this loss
-        optimizer = tf.train.AdamOptimizer()
+        optimizer = tf.compat.v1.train.AdamOptimizer()
         self.train_op = optimizer.minimize(self.loss) # Train the auto-encoder
 
 class DcnCompGraph(object):
@@ -123,7 +127,7 @@ class DcnCompGraph(object):
         embedding_size = ae_specs[0][int((len(ae_specs[0]) - 1) / 2)]
 
         # Placeholder tensor for input data
-        self.input = tf.placeholder(dtype=TF_FLOAT_TYPE, shape=(batch_size, input_size))
+        self.input = tf.compat.v1.placeholder(dtype=TF_FLOAT_TYPE, shape=(batch_size, input_size))
 
         # Auto-encoder loss computations
         self.embedding, self.output = autoencoder(self.input, ae_specs)  # Get the auto-encoder's embedding and output
@@ -133,16 +137,16 @@ class DcnCompGraph(object):
         # Clustering loss computations
         ## Tensor for cluster representatives
         minval_rep, maxval_rep = -1, 1
-        self.cluster_rep = tf.Variable(tf.random_uniform([n_clusters, embedding_size],
+        self.cluster_rep = tf.Variable(tf.compat.v1.random_uniform([n_clusters, embedding_size],
                                                     minval=minval_rep, maxval=maxval_rep,
                                                     dtype=TF_FLOAT_TYPE), name='cluster_rep', dtype=TF_FLOAT_TYPE)
 
         ## Clustering assignments for all samples in the dataset
-        initial_clustering_assign = tf.random_uniform(minval=0, maxval=n_clusters, dtype=tf.int32, shape=[n_samples])
+        initial_clustering_assign = tf.compat.v1.random_uniform(minval=0, maxval=n_clusters, dtype=tf.int32, shape=[n_samples])
         self.cluster_assign = tf.Variable(initial_clustering_assign, name='cluster_assign', dtype=tf.int32, trainable=False)
 
         ## Get the cluster representative corresponding to the cluster of each batch sample
-        self.indices = tf.placeholder(dtype=tf.int32, shape=batch_size)  # Placeholder for sample indices in current batch
+        self.indices = tf.compat.v1.placeholder(dtype=tf.int32, shape=batch_size)  # Placeholder for sample indices in current batch
         batch_clust_rep = []
         for j in range(batch_size):
             k = self.cluster_assign[self.indices[j]]  # Clustering assignment for sample j in batch
@@ -158,7 +162,7 @@ class DcnCompGraph(object):
         self.loss = self.ae_loss + val_lambda * self.kmeans_loss
 
         # The optimizer is defined to minimize this loss
-        optimizer = tf.train.AdamOptimizer()
+        optimizer = tf.train.compat.v1.AdamOptimizer()
         self.pretrain_op = optimizer.minimize(self.ae_loss) # Pretrain the autoencoder before starting DCN
         self.train_op = optimizer.minimize(self.loss)
 
@@ -172,7 +176,7 @@ class DcnCompGraph(object):
             new_assign = tf.argmin(f_func(tf.reshape(self.embedding[j, :], (1, embedding_size)), self.cluster_rep),
                                    output_type=tf.int32)
             # Update the clustering assignment
-            self.cluster_assign_update = tf.assign(self.cluster_assign[self.indices[j]], new_assign)
+            self.cluster_assign_update = tf.compat.v1.assign(self.cluster_assign[self.indices[j]], new_assign)
 
         # Update the cluster representatives
         ## Initialize the value of count
@@ -181,6 +185,6 @@ class DcnCompGraph(object):
         ## Update the cluster representatives according to Equation (8) in the DCN paper
         for j in range(batch_size):
             k = self.cluster_assign[self.indices[j]]  # Clustering assignment for sample j in batch
-            self.count_update = tf.assign(count[k], count[k] + 1)  # Updated count for cluster assignments
+            self.count_update = tf.compat.v1.assign(count[k], count[k] + 1)  # Updated count for cluster assignments
             new_rep = self.cluster_rep[k] - (1 / count[k]) * (self.cluster_rep[k] - self.embedding[j])
-            self.cluster_rep_update = tf.assign(self.cluster_rep[k], new_rep)
+            self.cluster_rep_update = tf.compat.v1.assign(self.cluster_rep[k], new_rep)
