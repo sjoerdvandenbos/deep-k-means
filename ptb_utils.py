@@ -8,7 +8,7 @@ from re import compile
 REGEX_MACHINE = compile(r"_[a-zA-z]*\.")
 
 
-def next_batch(num: int, data: np.array) -> (list[int], np.ndarray):
+def next_batch(num: int, data: np.array) -> (list, np.ndarray):
     """ Returns a batch of num random data """
     indices = np.arange(0, data.shape[0])
     np.random.shuffle(indices)
@@ -18,7 +18,7 @@ def next_batch(num: int, data: np.array) -> (list[int], np.ndarray):
     return indices, batch_data
 
 
-def get_filenames_and_labels() -> (list[str], list[str]):
+def get_filenames_and_labels() -> (list, list):
     files = sorted(glob(r"split/ptb-images-2-cropped/*/*/*.jpg"))
     labels = np.array([get_label(f) for f in files])
     return files, labels
