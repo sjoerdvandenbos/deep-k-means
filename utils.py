@@ -29,7 +29,9 @@ def cluster_acc(y_true, y_pred):
         w[y_pred[i], y_true[i]] += 1
     ind = linear_assignment(w.max() - w) # Optimal label mapping based on the Hungarian algorithm
 
-    return sum([w[i, j] for i, j in ind]) * 1.0 / y_pred.size
+    # ind is a tuple of arrays, we want an array of tuples
+    indices = np.array([(ind[0][i], ind[1][i]) for i in range(len(ind[0]))])
+    return sum([w[i, j] for i, j in indices]) * 1.0 / y_pred.size
 
 
 def next_batch(num, data):
