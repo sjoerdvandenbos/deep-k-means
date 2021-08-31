@@ -10,7 +10,7 @@ from sklearn.datasets import fetch_openml
 # Fetch the dataset
 dataset = fetch_openml("mnist_784")
 print("Dataset MNIST loaded...")
-data = dataset.data
+data = dataset.data.to_numpy()
 target = dataset.target
 n_samples = data.shape[0] # Number of samples in the dataset
 n_clusters = 10 # Number of clusters to obtain
