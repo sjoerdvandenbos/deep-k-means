@@ -9,7 +9,7 @@ n_clusters = 7
 
 
 # Auto-encoder architecture
-input_size = 2718 * 2220        # width * height
+input_size = 384 * 314        # width * height
 hidden_1_size = 500
 hidden_2_size = 500
 hidden_3_size = 2000
