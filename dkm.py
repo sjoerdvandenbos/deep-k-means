@@ -98,7 +98,7 @@ data = specs.data
 if args.cpu:
     os.environ['CUDA_VISIBLE_DEVICES'] = '-1' # Run on CPU instead of GPU if batch_size is small
 gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.05)
-config = tf.compat.v1.ConfigProto(gpu_options=gpu_options)
+config = tf.compat.v1.ConfigProto()
 
 # Definition of the randomly-drawn (0-10000) seeds to be used for each run
 seeds = [8905, 9129, 291, 4012, 1256, 6819, 4678, 6971, 1362, 575]

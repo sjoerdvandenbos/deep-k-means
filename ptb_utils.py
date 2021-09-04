@@ -22,7 +22,7 @@ def next_batch(num: tf.int32, data: np.ndarray) -> (np.ndarray, tf.Tensor):
     # Reshape to [N, H, W, C]
     batch_data = tf.reshape(batch_data, [shape[0], shape[1], shape[2], 1])
     down_sampled = tf.nn.conv2d(batch_data,
-                                filter=[[[[1]]]],
+                                [[[[1]]]],
                                 padding="VALID",
                                 strides=[7, 7],
                                 data_format="NHWC")
