@@ -154,6 +154,8 @@ for run in range(n_runs):
                     # Fetch a random data batch of the specified size
                     indices, data_batch = next_batch(batch_size, data)
 
+                    data_batch = data_batch.eval()
+
                     # Run the computation graph until pretrain_op (only on autoencoder) on the data batch
                     _, embedding_, ae_loss_ = sess.run((cg.pretrain_op, cg.embedding, cg.ae_loss),
                                                        feed_dict={cg.input: data_batch})

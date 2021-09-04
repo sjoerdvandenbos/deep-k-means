@@ -27,7 +27,7 @@ def next_batch(num: tf.int32, data: np.ndarray) -> (np.ndarray, tf.Tensor):
                                 strides=[7, 7],
                                 data_format="NHWC")
     flat = tf.reshape(down_sampled, [num, -1])
-    return indices, flat
+    return batch_indices, flat
 
 
 def get_filenames_and_labels() -> (np.ndarray, np.ndarray):
