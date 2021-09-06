@@ -97,7 +97,6 @@ data = specs.data
 # Hardware specifications
 if args.cpu:
     os.environ['CUDA_VISIBLE_DEVICES'] = '-1' # Run on CPU instead of GPU if batch_size is small
-gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.05)
 config = tf.compat.v1.ConfigProto()
 
 # Definition of the randomly-drawn (0-10000) seeds to be used for each run
@@ -153,8 +152,6 @@ for run in range(n_runs):
                 for _ in range(n_batches):
                     # Fetch a random data batch of the specified size
                     indices, data_batch = next_batch(batch_size, data)
-
-                    data_batch = data_batch.eval()
 
                     # Run the computation graph until pretrain_op (only on autoencoder) on the data batch
                     _, embedding_, ae_loss_ = sess.run((cg.pretrain_op, cg.embedding, cg.ae_loss),
