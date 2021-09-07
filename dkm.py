@@ -114,7 +114,7 @@ else:
     list_ari = []
     list_nmi = []
 
-n_runs = 1
+n_runs = 10
 for run in range(n_runs):
     tf.compat.v1.reset_default_graph()
     # Use a fixed seed for this run, as defined in the seed list

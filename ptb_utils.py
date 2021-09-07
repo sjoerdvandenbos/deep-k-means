@@ -42,10 +42,10 @@ def get_image_tensor(path: str) -> np.ndarray:
     image = Image.open(path)
     # Image is black and white, so one channel will give all info needed
     red, _, _ = image.split()
-    cropped = np.array(red)[11:2209, 9:2709]
+    cropped = np.array(red)[11:2209, 15:2703]
     # Reduce pixel range to [0, 1]
     mapped = cropped / 255.0
-    reduced = skimage.measure.block_reduce(mapped, (60, 60), np.mean)
+    reduced = skimage.measure.block_reduce(mapped, (7, 7), np.mean)
     return reduced
 
 

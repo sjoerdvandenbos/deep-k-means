@@ -2,3 +2,5 @@
 .python-version
 __pycache__
 split/ptb-images-2-cropped
+
+*.txt
