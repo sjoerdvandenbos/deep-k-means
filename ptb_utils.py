@@ -1,6 +1,7 @@
 from PIL import Image
 import numpy as np
 import tensorflow as tf
+import skimage.measure
 
 from glob import glob
 from re import compile
@@ -16,18 +17,8 @@ def next_batch(num: tf.int32, data: np.ndarray) -> (np.ndarray, tf.Tensor):
     np.random.shuffle(indices)
     batch_indices = indices[:num]
     batch_paths = data[batch_indices]
-    # Shape of batch_data = [N, H, W]
-    batch_data = tf.convert_to_tensor([get_image_tensor(p) for p in batch_paths])
-    shape = batch_data.shape
-    # Reshape to [N, H, W, C]
-    batch_data = tf.reshape(batch_data, [shape[0], shape[1], shape[2], 1])
-    down_sampled = tf.nn.conv2d(batch_data,
-                                [[[[1]]]],
-                                padding="VALID",
-                                strides=[60, 60],
-                                data_format="NHWC")
-    flat = tf.reshape(down_sampled, [num, -1])
-    return batch_indices, flat.eval()
+    batch_data = np.array([get_image_tensor(p).flatten() for p in batch_paths])
+    return batch_indices, batch_data
 
 
 def get_filenames_and_labels() -> (np.ndarray, np.ndarray):
@@ -45,16 +36,26 @@ def get_label(path: str) -> str:
     return disease
 
 
-def get_image_tensor(path: str) -> tf.Tensor:
+def get_image_tensor(path: str) -> np.ndarray:
     """ Takes the input file path and returns a 2D Tensor
     containing all pixel values of a single channel. """
     image = Image.open(path)
     # Image is black and white, so one channel will give all info needed
     red, _, _ = image.split()
-    cropped = tf.convert_to_tensor(np.array(red), dtype=tf.float32)[11:2209, 9:2709]
+    cropped = np.array(red)[11:2209, 9:2709]
     # Reduce pixel range to [0, 1]
-    reduced = cropped / 255.0
+    mapped = cropped / 255.0
+    reduced = skimage.measure.block_reduce(mapped, (60, 60), np.mean)
     return reduced
+
+
+def memory():
+    import os
+    import psutil
+    pid = os.getpid()
+    py = psutil.Process(pid)
+    memoryUse = py.memory_info()[0]/2.**30  # memory use in GB...I think
+    print('memory use:', memoryUse)
 
 
 if __name__ == "__main__":

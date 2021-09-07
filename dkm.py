@@ -126,6 +126,7 @@ for run in range(n_runs):
 
     # Define the computation graph for DKM
     cg = DkmCompGraph([specs.dimensions, specs.activations, specs.names], specs.n_clusters, lambda_)
+    _, embedding_, ae_loss_ = None, None, None
 
     # Run the computation graph
     with tf.compat.v1.Session(config=config) as sess:
@@ -161,7 +162,6 @@ for run in range(n_runs):
                     # Save the embeddings for batch samples
                     for j in range(len(indices)):
                         embeddings[indices[j], :] = embedding_[j, :]
-
                     #print("ae_loss_:", float(ae_loss_))
 
             # Second, run k-means++ on the pretrained embeddings
