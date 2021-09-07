@@ -1,15 +1,25 @@
 import tensorflow as tf
+import numpy as np
 
 from ptb_utils import get_filenames_and_labels
 
 # Note that data here is only a list with filenames, not the actual images.
-data, target = get_filenames_and_labels()
+data, diseases = get_filenames_and_labels()
 n_samples = len(data)
 n_clusters = 7
-
+disease_mapping = {
+    "BundleBranchBlock": 0,
+    "Cardiomyopathy": 1,
+    "Dysrhythmia": 2,
+    "HealthyControl": 3,
+    "MyocardialInfarction": 4,
+    "Myocarditis": 5,
+    "ValvularHeartDisease": 6
+}
+target = np.array([disease_mapping[d] for d in diseases])
 
 # Auto-encoder architecture
-input_size = 384 * 314        # width * height
+input_size = 1665
 hidden_1_size = 500
 hidden_2_size = 500
 hidden_3_size = 2000

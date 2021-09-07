@@ -114,7 +114,7 @@ else:
     list_ari = []
     list_nmi = []
 
-n_runs = 2
+n_runs = 1
 for run in range(n_runs):
     tf.compat.v1.reset_default_graph()
     # Use a fixed seed for this run, as defined in the seed list
@@ -150,6 +150,7 @@ for run in range(n_runs):
 
                 # Loop over the samples
                 for _ in range(n_batches):
+                # for _ in range(1):
                     # Fetch a random data batch of the specified size
                     indices, data_batch = next_batch(batch_size, data)
 
@@ -204,12 +205,14 @@ for run in range(n_runs):
             print("Starting DKM training...")
         ## Loop over alpha (inverse temperature), from small to large values
         for k in range(len(alphas)):
+        # for k in range(1):
             print("Training step: alpha[{}]: {}".format(k, alphas[k]))
 
             # Loop over epochs per alpha
             for _ in range(n_finetuning_epochs):
                 # Loop over the samples
                 for _ in range(n_batches):
+                # for _ in range(1):
                     #print("Training step: alpha[{}], epoch {}".format(k, i))
 
                     # Fetch a random data batch of the specified size
@@ -230,6 +233,7 @@ for run in range(n_runs):
             # Evaluate the clustering performance every print_val alpha and for last alpha
             print_val = 1
             if k % print_val == 0 or k == max_n - 1:
+            # if True:
                 print("loss:", loss_)
                 print("ae loss:", ae_loss_)
                 print("kmeans loss:", kmeans_loss_)

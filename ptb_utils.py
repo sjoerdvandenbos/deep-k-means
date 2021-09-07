@@ -24,7 +24,7 @@ def next_batch(num: tf.int32, data: np.ndarray) -> (np.ndarray, tf.Tensor):
     down_sampled = tf.nn.conv2d(batch_data,
                                 [[[[1]]]],
                                 padding="VALID",
-                                strides=[7, 7],
+                                strides=[60, 60],
                                 data_format="NHWC")
     flat = tf.reshape(down_sampled, [num, -1])
     return batch_indices, flat.eval()
@@ -51,7 +51,7 @@ def get_image_tensor(path: str) -> tf.Tensor:
     image = Image.open(path)
     # Image is black and white, so one channel will give all info needed
     red, _, _ = image.split()
-    cropped = tf.convert_to_tensor(np.array(red), dtype=tf.float32)[11:2209, 15:2703]
+    cropped = tf.convert_to_tensor(np.array(red), dtype=tf.float32)[11:2209, 9:2709]
     # Reduce pixel range to [0, 1]
     reduced = cropped / 255.0
     return reduced
