@@ -77,7 +77,7 @@ if annealing and not pretrain:
     alphas = alphas / constant_value
 elif not annealing and pretrain:
     constant_value = 1  # specs.embedding_size # Used to modify the range of the alpha scheme
-    max_n = 20  # Number of alpha values to consider (constant values are used here)
+    max_n = 1  # Number of alpha values to consider (constant values are used here)
     alphas = 1000*np.ones(max_n, dtype=float) # alpha is constant
     alphas = alphas / constant_value
 else:
