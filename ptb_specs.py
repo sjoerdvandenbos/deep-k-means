@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 
 from ptb_utils import get_filenames_and_labels
+from utils import read_list
 
 # Note that data here is only a list with filenames, not the actual images.
 data, diseases = get_filenames_and_labels()
@@ -18,8 +19,12 @@ disease_mapping = {
 }
 target = np.array([disease_mapping[d] for d in diseases])
 
+# Get the split between training/test set and validation set
+test_indices = read_list("split/ptb-images-2-cropped/test")
+train_indices = read_list("split/ptb-images-2-cropped/validation")
+
 # Auto-encoder architecture
-input_size = 1665
+input_size = 120576
 hidden_1_size = 500
 hidden_2_size = 500
 hidden_3_size = 2000
