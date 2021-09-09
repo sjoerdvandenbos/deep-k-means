@@ -14,6 +14,19 @@ from sklearn.cluster import KMeans
 from utils import cluster_acc
 from compgraph import DkmCompGraph
 
+
+def print_cluster_metrics(ground_truths, cluster_labels, phase):
+    """
+    @param phase: The phase of the experiment, either train or test.
+    """
+    acc = cluster_acc(ground_truths, cluster_labels)
+    print(f"{phase} ACC: {acc}")
+    ari = adjusted_rand_score(ground_truths, cluster_labels)
+    print(f"{phase} ARI: {ari}")
+    nmi = normalized_mutual_info_score(ground_truths, cluster_labels)
+    print(f"{phase} NMI: {nmi}")
+
+
 parser = argparse.ArgumentParser(description="Deep k-means algorithm")
 parser.add_argument("-d", "--dataset", type=str.upper,
                     help="Dataset on which DKM will be run (one of USPS, MNIST, 20NEWS, RCV1)", required=True)
@@ -84,15 +97,16 @@ else:
     parser.error("Run with either annealing (-a) or pretraining (-p), but not both.")
     exit()
 
-# Select only the labels which are to be used in the evaluation (disjoint for validation and test)
-if validation:
-    validation_target = np.asarray([specs.target[i] for i in specs.validation_indices])
-    test_target = np.asarray([specs.target[i] for i in specs.test_indices])
-else:
-    target = specs.target
 
 # Dataset on which the computation graph will be run
 data = specs.data
+target = specs.target
+
+# Select only the labels which are to be used in the evaluation (disjoint for validation and test)
+train_target = target[specs.train_indices]
+train_data = data[specs.train_indices]
+test_target = target[specs.test_indices]
+test_data = data[specs.test_indices]
 
 # Hardware specifications
 if args.cpu:
@@ -102,19 +116,7 @@ config = tf.compat.v1.ConfigProto()
 # Definition of the randomly-drawn (0-10000) seeds to be used for each run
 seeds = [8905, 9129, 291, 4012, 1256, 6819, 4678, 6971, 1362, 575]
 
-if validation:
-    list_validation_acc = []
-    list_validation_ari = []
-    list_validation_nmi = []
-    list_test_acc = []
-    list_test_ari = []
-    list_test_nmi = []
-else:
-    list_acc = []
-    list_ari = []
-    list_nmi = []
-
-n_runs = 10
+n_runs = 1
 for run in range(n_runs):
     tf.compat.v1.reset_default_graph()
     # Use a fixed seed for this run, as defined in the seed list
@@ -126,7 +128,6 @@ for run in range(n_runs):
 
     # Define the computation graph for DKM
     cg = DkmCompGraph([specs.dimensions, specs.activations, specs.names], specs.n_clusters, lambda_)
-    _, embedding_, ae_loss_ = None, None, None
 
     # Run the computation graph
     with tf.compat.v1.Session(config=config) as sess:
@@ -134,176 +135,127 @@ for run in range(n_runs):
         init = tf.compat.v1.global_variables_initializer()
         sess.run(init)
 
-        # Variables to save tensor content
-        distances = np.zeros((specs.n_clusters, specs.n_samples))
-
         # Pretrain if specified
         if pretrain:
             print("Starting autoencoder pretraining...")
 
             # Variables to save pretraining tensor content
-            embeddings = np.zeros((specs.n_samples, specs.embedding_size), dtype=float)
+            train_embeddings = np.zeros((train_data.shape[0], specs.embedding_size), dtype=float)
+            test_embeddings = np.zeros((test_data.shape[0], specs.embedding_size), dtype=float)
 
             # First, pretrain the autoencoder
-            ## Loop over epochs
             for epoch in range(n_pretrain_epochs):
-                print("Pretraining step: epoch {}".format(epoch))
+                print(f"Pretraining step: epoch {epoch}")
 
-                # Loop over the samples
                 for _ in range(n_batches):
-                # for _ in range(1):
                     # Fetch a random data batch of the specified size
-                    indices, data_batch = next_batch(batch_size, data)
+                    train_indices, train_batch = next_batch(batch_size, train_data)
 
                     # Run the computation graph until pretrain_op (only on autoencoder) on the data batch
-                    _, embedding_, ae_loss_ = sess.run((cg.pretrain_op, cg.embedding, cg.ae_loss),
-                                                       feed_dict={cg.input: data_batch})
+                    _, train_embedding_, ae_loss_, stack_dist = sess.run((cg.pretrain_op, cg.embedding, cg.ae_loss, cg.stack_dist),
+                                                        feed_dict={cg.input: train_batch})
+                    del train_batch, _
+
+                    test_indices, test_batch = next_batch(batch_size, test_data)
+                    test_embedding_ = sess.run(cg.embedding, feed_dict={cg.input: test_batch})
 
                     # Save the embeddings for batch samples
-                    for j in range(len(indices)):
-                        embeddings[indices[j], :] = embedding_[j, :]
-                    #print("ae_loss_:", float(ae_loss_))
+                    for j in range(batch_size):
+                        train_embeddings[train_indices[j], :] = train_embedding_[j, :]
+                        test_embeddings[test_indices[j], :] = test_embedding_[j, :]
 
-            # Second, run k-means++ on the pretrained embeddings
-            print("Running k-means on the learned embeddings...")
-            kmeans_model = KMeans(n_clusters=specs.n_clusters, init="k-means++").fit(embeddings)
+                nonzero_train_indices = np.all(train_embeddings != 0, axis=1)
+                train_nonzeros = train_embeddings[nonzero_train_indices]
+                train_ground_truths = train_target[nonzero_train_indices]
 
-            if validation:
-                # Split the cluster assignments into validation and test ones
-                validation_cluster_assign = np.asarray([kmeans_model.labels_[i] for i in specs.validation_indices])
-                test_cluster_assign = np.asarray([kmeans_model.labels_[i] for i in specs.test_indices])
+                nonzero_test_indices = np.all(test_embeddings != 0, axis=1)
+                test_nonzeros = test_embeddings[nonzero_test_indices]
+                test_ground_truths = test_target[nonzero_test_indices]
 
-                # Evaluate the clustering validation performance using the ground-truth labels
-                validation_acc = cluster_acc(validation_target, validation_cluster_assign)
-                print("Validation ACC", validation_acc)
-                validation_ari = adjusted_rand_score(validation_target, validation_cluster_assign)
-                print("Validation ARI", validation_ari)
-                validation_nmi = normalized_mutual_info_score(validation_target, validation_cluster_assign)
-                print("Validation NMI", validation_nmi)
+                kmeans_model = KMeans(n_clusters=specs.n_clusters, init="k-means++").fit(train_nonzeros)
+                train_cluster_labels = kmeans_model.labels_
+                test_cluster_labels = kmeans_model.predict(test_nonzeros)
 
-                # Evaluate the clustering test performance using the ground-truth labels
-                test_acc = cluster_acc(test_target, test_cluster_assign)
-                print("Test ACC", test_acc)
-                test_ari = adjusted_rand_score(test_target, test_cluster_assign)
-                print("Test ARI", test_ari)
-                test_nmi = normalized_mutual_info_score(test_target, test_cluster_assign)
-                print("Test NMI", test_nmi)
-            else:
-                # Evaluate the clustering performance using the ground-truth labels
-                acc = cluster_acc(target, kmeans_model.labels_)
-                print("ACC", acc)
-                ari = adjusted_rand_score(target, kmeans_model.labels_)
-                print("ARI", ari)
-                nmi = normalized_mutual_info_score(target, kmeans_model.labels_)
-                print("NMI", nmi)
+                print(f"Auto encoder loss: {ae_loss_}")
+                print_cluster_metrics(train_ground_truths, train_cluster_labels, "Train")
+                print_cluster_metrics(test_ground_truths, test_cluster_labels, "Test")
+                print("")
+
 
             # The cluster centers are used to initialize the cluster representatives in DKM
             sess.run(tf.compat.v1.assign(cg.cluster_rep, kmeans_model.cluster_centers_))
 
+        # Variables to save tensor content
+        train_distances = np.zeros((specs.n_clusters, train_data.shape[0]))
+        test_distances = np.zeros((specs.n_clusters, test_data.shape[0]))
+
+        list_train_acc = []
+        list_train_ari = []
+        list_train_nmi = []
+        list_test_acc = []
+        list_test_ari = []
+        list_test_nmi = []
+
         # Train the full DKM model
-        if (len(alphas) > 0):
-            print("Starting DKM training...")
-        ## Loop over alpha (inverse temperature), from small to large values
-        for k in range(len(alphas)):
-        # for k in range(1):
-            print("Training step: alpha[{}]: {}".format(k, alphas[k]))
+        for epoch in range(n_finetuning_epochs):
+            print(f"Training step: epoch {epoch}")
+            # Loop over the samples
+            for _ in range(n_batches):
+                # Fetch a random data batch of the specified size
+                train_indices, train_batch = next_batch(batch_size, train_data)
+                # Run the computation graph on the data batch
+                _, train_loss_, train_stack_dist_, cluster_rep_, train_ae_loss_, train_kmeans_loss_ =\
+                    sess.run((cg.train_op, cg.loss, cg.stack_dist, cg.cluster_rep, cg.ae_loss, cg.kmeans_loss),
+                             feed_dict={cg.input: train_batch, cg.alpha: alphas[0]})
+                del train_batch, _
 
-            # Loop over epochs per alpha
-            for _ in range(n_finetuning_epochs):
-                # Loop over the samples
-                for _ in range(n_batches):
-                # for _ in range(1):
-                    #print("Training step: alpha[{}], epoch {}".format(k, i))
+                test_indices, test_batch = next_batch(batch_size, test_data)
+                test_loss_, test_stack_dist_, test_ae_loss, test_kmeans_loss_ =\
+                    sess.run((cg.loss, cg.stack_dist, cg.ae_loss, cg.kmeans_loss),
+                             feed_dict={cg.input: test_batch, cg.alpha: alphas[0]})
 
-                    # Fetch a random data batch of the specified size
-                    indices, data_batch = next_batch(batch_size, data)
-
-                    #print(tf.trainable_variables())
-                    #current_batch_size = np.shape(data_batch)[0] # Can be different from batch_size for unequal splits
-
-                    # Run the computation graph on the data batch
-                    _, loss_, stack_dist_, cluster_rep_, ae_loss_, kmeans_loss_ =\
-                        sess.run((cg.train_op, cg.loss, cg.stack_dist, cg.cluster_rep, cg.ae_loss, cg.kmeans_loss),
-                                 feed_dict={cg.input: data_batch, cg.alpha: alphas[k]})
-
-                    # Save the distances for batch samples
-                    for j in range(len(indices)):
-                        distances[:, indices[j]] = stack_dist_[:, j]
+                # Save the distances for batch samples
+                for j in range(batch_size):
+                    train_distances[:, train_indices[j]] = train_stack_dist_[:, j]
+                    test_distances[:, test_indices[j]] = test_stack_dist_[:, j]
 
             # Evaluate the clustering performance every print_val alpha and for last alpha
-            print_val = 1
-            if k % print_val == 0 or k == max_n - 1:
-            # if True:
-                print("loss:", loss_)
-                print("ae loss:", ae_loss_)
-                print("kmeans loss:", kmeans_loss_)
+            print("train loss:", train_loss_)
+            print("train auto encoder loss:", ae_loss_)
+            print("train kmeans loss:", train_kmeans_loss_)
 
-                # Infer cluster assignments for all samples
-                cluster_assign = np.zeros((specs.n_samples), dtype=float)
-                for i in range(specs.n_samples):
-                    index_closest_cluster = np.argmin(distances[:, i])
-                    cluster_assign[i] = index_closest_cluster
-                cluster_assign = cluster_assign.astype(np.int64)
+            # Infer cluster assignments for all samples
+            train_cluster_labels = np.zeros((train_data.shape[0]), dtype=float)
+            test_cluster_labels = np.zeros((test_data.shape[0]), dtype=float)
+            for i in range(train_data.shape[0]):
+                train_cluster_index = np.argmin(train_distances[:, i])
+                train_cluster_labels[i] = train_cluster_index
+                test_cluster_index = np.argmin(test_distances[:, i])
+                test_cluster_labels[i] = test_cluster_index
+            train_cluster_labels = train_cluster_labels.astype(np.int64)
+            test_cluster_labels = test_cluster_labels.astype(np.int64)
 
-                if validation:
-                    validation_cluster_assign = np.asarray([cluster_assign[i] for i in specs.validation_indices])
-                    test_cluster_assign = np.asarray([cluster_assign[i] for i in specs.test_indices])
+            # Here we want to get rid of the embeddings that were not randomly picked by the next_batch()
+            nonzero_train_indices = np.all(train_distances != 0, axis=0)
+            nonzero_train_cluster_labels = train_cluster_labels[nonzero_train_indices]
+            nonzero_train_ground_truths = train_target[nonzero_train_indices]
+            print_cluster_metrics(nonzero_train_ground_truths, nonzero_train_cluster_labels, "Train")
 
-                    # Evaluate the clustering validation performance using the ground-truth labels
-                    validation_acc = cluster_acc(validation_target, validation_cluster_assign)
-                    print("Validation ACC", validation_acc)
-                    validation_ari = adjusted_rand_score(validation_target, validation_cluster_assign)
-                    print("Validation ARI", validation_ari)
-                    validation_nmi = normalized_mutual_info_score(validation_target, validation_cluster_assign)
-                    print("Validation NMI", validation_nmi)
+            nonzero_test_indices = np.all(test_distances != 0, axis=0)  # Col indices where all elements were 0
+            nonzero_test_cluster_labels = test_cluster_labels[nonzero_test_indices]
+            nonzero_test_ground_truths = test_target[nonzero_test_indices]
+            print_cluster_metrics(nonzero_test_ground_truths, nonzero_test_cluster_labels, "Test")
 
-                    # Evaluate the clustering test performance using the ground-truth labels
-                    test_acc = cluster_acc(test_target, test_cluster_assign)
-                    print("Test ACC", test_acc)
-                    test_ari = adjusted_rand_score(test_target, test_cluster_assign)
-                    print("Test ARI", test_ari)
-                    test_nmi = normalized_mutual_info_score(test_target, test_cluster_assign)
-                    print("Test NMI", test_nmi)
-                else:
-                    # Evaluate the clustering performance using the ground-truth labels
-                    acc = cluster_acc(target, cluster_assign)
-                    print("ACC", acc)
-                    ari = adjusted_rand_score(target, cluster_assign)
-                    print("ARI", ari)
-                    nmi = normalized_mutual_info_score(target, cluster_assign)
-                    print("NMI", nmi)
-
-        # Record the clustering performance for the run
-        if validation:
-            list_validation_acc.append(validation_acc)
-            list_validation_ari.append(validation_ari)
-            list_validation_nmi.append(validation_nmi)
-            list_test_acc.append(test_acc)
-            list_test_ari.append(test_ari)
-            list_test_nmi.append(test_nmi)
-        else:
-            list_acc.append(acc)
-            list_ari.append(ari)
-            list_nmi.append(nmi)
-
-if validation:
-    list_validation_acc = np.array(list_validation_acc)
-    print("Average validation ACC: {:.3f} +/- {:.3f}".format(np.mean(list_validation_acc), np.std(list_validation_acc)))
-    list_validation_ari = np.array(list_validation_ari)
-    print("Average validation ARI: {:.3f} +/- {:.3f}".format(np.mean(list_validation_ari), np.std(list_validation_ari)))
-    list_validation_nmi = np.array(list_validation_nmi)
-    print("Average validation NMI: {:.3f} +/- {:.3f}".format(np.mean(list_validation_nmi), np.std(list_validation_nmi)))
-
-    list_test_acc = np.array(list_test_acc)
-    print("Average test ACC: {:.3f} +/- {:.3f}".format(np.mean(list_test_acc), np.std(list_test_acc)))
-    list_test_ari = np.array(list_test_ari)
-    print("Average test ARI: {:.3f} +/- {:.3f}".format(np.mean(list_test_ari), np.std(list_test_ari)))
-    list_test_nmi = np.array(list_test_nmi)
-    print("Average test NMI: {:.3f} +/- {:.3f}".format(np.mean(list_test_nmi), np.std(list_test_nmi)))
-else:
-    list_acc = np.array(list_acc)
-    print("Average ACC: {:.3f} +/- {:.3f}".format(np.mean(list_acc), np.std(list_acc)))
-    list_ari = np.array(list_ari)
-    print("Average ARI: {:.3f} +/- {:.3f}".format(np.mean(list_ari), np.std(list_ari)))
-    list_nmi = np.array(list_nmi)
-    print("Average NMI: {:.3f} +/- {:.3f}".format(np.mean(list_nmi), np.std(list_nmi)))
+# list_train_acc = np.array(list_train_acc)
+# print("Average validation ACC: {:.3f} +/- {:.3f}".format(np.mean(list_train_acc), np.std(list_train_acc)))
+# list_train_ari = np.array(list_train_ari)
+# print("Average validation ARI: {:.3f} +/- {:.3f}".format(np.mean(list_train_ari), np.std(list_train_ari)))
+# list_train_nmi = np.array(list_train_nmi)
+# print("Average validation NMI: {:.3f} +/- {:.3f}".format(np.mean(list_train_nmi), np.std(list_train_nmi)))
+#
+# list_test_acc = np.array(list_test_acc)
+# print("Average test ACC: {:.3f} +/- {:.3f}".format(np.mean(list_test_acc), np.std(list_test_acc)))
+# list_test_ari = np.array(list_test_ari)
+# print("Average test ARI: {:.3f} +/- {:.3f}".format(np.mean(list_test_ari), np.std(list_test_ari)))
+# list_test_nmi = np.array(list_test_nmi)
+# print("Average test NMI: {:.3f} +/- {:.3f}".format(np.mean(list_test_nmi), np.std(list_test_nmi)))
