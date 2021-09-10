@@ -147,7 +147,8 @@ for run in range(n_runs):
             for epoch in range(n_pretrain_epochs):
                 print(f"Pretraining step: epoch {epoch}")
 
-                for _ in range(n_batches):
+                for b in range(n_batches):
+                    print(f"Starting batch {b} out of {n_batches} batches.")
                     # Fetch a random data batch of the specified size
                     train_indices, train_batch = next_batch(batch_size, train_data)
 
