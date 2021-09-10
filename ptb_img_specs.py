@@ -6,7 +6,6 @@ from utils import read_list
 
 # Note that data here is only a list with filenames, not the actual images.
 data, diseases = get_filenames_and_labels()
-n_samples = len(data)
 n_clusters = 7
 disease_mapping = {
     "BundleBranchBlock": 0,
@@ -22,6 +21,8 @@ target = np.array([disease_mapping[d] for d in diseases])
 # Get the split between training/test set and validation set
 test_indices = read_list("split/ptb-images-2-cropped/test")
 train_indices = read_list("split/ptb-images-2-cropped/validation")
+
+n_samples = len(train_indices)
 
 # Auto-encoder architecture
 input_size = 120576
