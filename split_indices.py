@@ -5,7 +5,7 @@ import numpy as np
 
 
 # Training and test data can be divided by sorting
-all_files = sorted(glob.glob("split/ptb-images-2-cropped/*/*/*"))
+all_files = sorted(glob.glob("split/ptb-matrices/*/*/*"))
 first_train, first_test = None, None
 for i, f in enumerate(all_files):
     if first_train is None and "train" in f:
@@ -20,5 +20,5 @@ indices = np.arange(0, len(all_files))
 training = pd.DataFrame(indices[:first_test])
 testing = pd.DataFrame(indices[first_test:])
 
-training.to_csv("split/ptb-images-2-cropped/validation", index=False, header=False)
-testing.to_csv("split/ptb-images-2-cropped/test", index=False, header=False)
+training.to_csv("split/ptb-matrices/validation", index=False, header=False)
+testing.to_csv("split/ptb-matrices/test", index=False, header=False)
