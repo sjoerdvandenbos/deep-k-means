@@ -46,7 +46,7 @@ parser.add_argument("-b", "--batch_size", type=int, default=256, help="Size of t
 args = parser.parse_args()
 
 if args.dataset == "PTB":
-    from ptb_utils import next_batch
+    from ptb_img_utils import next_batch
 else:
     from utils import next_batch
 
@@ -60,7 +60,7 @@ elif args.dataset == "20NEWS":
 elif args.dataset == "RCV1":
     import rcv1_specs as specs
 elif args.dataset == "PTB":
-    import ptb_specs as specs
+    import ptb_img_specs as specs
 else:
     parser.error("Unknown dataset!")
     exit()

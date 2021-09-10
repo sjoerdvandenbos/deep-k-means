@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 
-from ptb_utils import get_filenames_and_labels
+from ptb_img_utils import get_filenames_and_labels
 from utils import read_list
 
 # Note that data here is only a list with filenames, not the actual images.
