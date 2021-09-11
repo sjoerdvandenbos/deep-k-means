@@ -69,7 +69,7 @@ elif args.dataset == "RCV1":
     import rcv1_specs as specs
 elif args.dataset == "PTB":
     import ptb_img_specs as specs
-elif args.dataset == "PTB_MAT":
+elif args.dataset == "PTBMAT":
     import ptb_matrix_specs as specs
 else:
     parser.error("Unknown dataset!")
@@ -221,7 +221,7 @@ for run in range(n_runs):
                 del train_batch, _
 
                 test_indices, test_batch = next_batch(batch_size, test_data)
-                test_loss_, test_stack_dist_, test_ae_loss, test_kmeans_loss_ =\
+                test_loss_, test_stack_dist_, test_ae_loss_, test_kmeans_loss_ =\
                     sess.run((cg.loss, cg.stack_dist, cg.ae_loss, cg.kmeans_loss),
                              feed_dict={cg.input: test_batch, cg.alpha: alphas[0]})
 
@@ -230,10 +230,6 @@ for run in range(n_runs):
                     train_distances[:, train_indices[j]] = train_stack_dist_[:, j]
                     test_distances[:, test_indices[j]] = test_stack_dist_[:, j]
 
-            # Evaluate the clustering performance every print_val alpha and for last alpha
-            print("train loss:", train_loss_)
-            print("train auto encoder loss:", ae_loss_)
-            print("train kmeans loss:", train_kmeans_loss_)
 
             train_cluster_labels = infer_cluster_label(train_distances, train_data.shape[0])
             test_cluster_labels = infer_cluster_label(test_distances, test_data.shape[0])
@@ -243,11 +239,18 @@ for run in range(n_runs):
             nonzero_train_cluster_labels = train_cluster_labels[nonzero_train_indices]
             nonzero_train_ground_truths = train_target[nonzero_train_indices]
             print_cluster_metrics(nonzero_train_ground_truths, nonzero_train_cluster_labels, "Train")
+            # Evaluate the clustering performance every print_val alpha and for last alpha
+            print("train loss: ", train_loss_)
+            print("train auto encoder loss: ", ae_loss_)
+            print("train kmeans loss: ", train_kmeans_loss_)
 
             nonzero_test_indices = np.all(test_distances != 0, axis=0)  # Col indices where all elements were 0
             nonzero_test_cluster_labels = test_cluster_labels[nonzero_test_indices]
             nonzero_test_ground_truths = test_target[nonzero_test_indices]
             print_cluster_metrics(nonzero_test_ground_truths, nonzero_test_cluster_labels, "Test")
+            print("test loss: ", test_loss_)
+            print("test auto encoder loss: ", test_ae_loss_)
+            print("test kmeans loss: ", test_kmeans_loss_)
 
 # list_train_acc = np.array(list_train_acc)
 # print("Average validation ACC: {:.3f} +/- {:.3f}".format(np.mean(list_train_acc), np.std(list_train_acc)))
