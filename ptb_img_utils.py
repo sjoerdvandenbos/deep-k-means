@@ -21,8 +21,8 @@ def next_batch(num: tf.int32, data: np.ndarray) -> (np.ndarray, tf.Tensor):
     return batch_indices, batch_data
 
 
-def get_filenames_and_labels() -> (np.ndarray, np.ndarray):
-    files = sorted(glob(r"split/ptb-images-2-cropped/*/*/*.jpg"))
+def get_filenames_and_labels(dataset_path: str) -> (np.ndarray, np.ndarray):
+    files = sorted(glob(f"{dataset_path}/*/*/*"))
     array = np.array(files)
     labels = np.array([get_label(f) for f in files])
     return array, labels

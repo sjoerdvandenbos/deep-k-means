@@ -6,14 +6,20 @@ import skimage.measure
 from ptb_img_utils import get_filenames_and_labels
 from utils import read_list
 
+
 # Note that data here is only a list with filenames, not the actual images.
-filenames, diseases = get_filenames_and_labels()
+filenames, diseases = get_filenames_and_labels("split/ptb-matrices")
+
+print("loading matrix data")
 
 data = []
 for f in filenames:
-    matrix = pd.read_csv(f, delimiter=",", header=None, names=None).to_numpy()
+    matrix = pd.read_csv(f, sep=",", header=0, nrows=15, low_memory=False, dtype=np.float64, engine="c").to_numpy()
     reduced = skimage.measure.block_reduce(matrix, (1, 7), np.max, cval=-3)
     data.append(reduced)
+data = np.asarray(data)
+
+print("matrix data loaded")
 
 n_clusters = 7
 disease_mapping = {
