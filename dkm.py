@@ -69,6 +69,8 @@ elif args.dataset == "RCV1":
     import rcv1_specs as specs
 elif args.dataset == "PTB":
     import ptb_img_specs as specs
+elif args.dataset == "PTB_MAT":
+    import ptb_matrix_specs as specs
 else:
     parser.error("Unknown dataset!")
     exit()
