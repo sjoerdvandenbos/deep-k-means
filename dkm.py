@@ -155,10 +155,10 @@ for run in range(n_runs):
 
             # First, pretrain the autoencoder
             for epoch in range(n_pretrain_epochs):
-                print(f"Pretraining step: epoch {epoch}")
+                print(f"Pretraining step: epoch {epoch}", flush=True)
 
                 for b in range(n_batches):
-                    print(f"Starting batch {b} out of {n_batches} batches.")
+                    print(f"Starting batch {b} out of {n_batches} batches.", flush=True)
                     # Fetch a random data batch of the specified size
                     train_indices, train_batch = next_batch(batch_size, train_data)
 
@@ -190,7 +190,7 @@ for run in range(n_runs):
                 print(f"Auto encoder loss: {ae_loss_}")
                 print_cluster_metrics(train_ground_truths, train_cluster_labels, "Train")
                 print_cluster_metrics(test_ground_truths, test_cluster_labels, "Test")
-                print("")
+                print("", flush=True)
 
 
             # The cluster centers are used to initialize the cluster representatives in DKM
@@ -209,7 +209,7 @@ for run in range(n_runs):
 
         # Train the full DKM model
         for epoch in range(n_finetuning_epochs):
-            print(f"Training step: epoch {epoch}")
+            print(f"Training step: epoch {epoch}", flush=True)
             # Loop over the samples
             for _ in range(n_batches):
                 # Fetch a random data batch of the specified size
