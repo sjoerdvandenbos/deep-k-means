@@ -27,6 +27,14 @@ def print_cluster_metrics(ground_truths, cluster_labels, phase):
     print(f"{phase} NMI: {nmi}")
 
 
+def infer_cluster_label(distances, data_size):
+    cluster_labels = np.zeros((data_size), dtype=float)
+    for i in range(data_size):
+        cluster_index = np.argmin(distances[:, i])
+        cluster_labels[i] = cluster_index
+    return cluster_labels.astype(np.int64)
+
+
 parser = argparse.ArgumentParser(description="Deep k-means algorithm")
 parser.add_argument("-d", "--dataset", type=str.upper,
                     help="Dataset on which DKM will be run (one of USPS, MNIST, 20NEWS, RCV1)", required=True)
@@ -225,16 +233,8 @@ for run in range(n_runs):
             print("train auto encoder loss:", ae_loss_)
             print("train kmeans loss:", train_kmeans_loss_)
 
-            # Infer cluster assignments for all samples
-            train_cluster_labels = np.zeros((train_data.shape[0]), dtype=float)
-            test_cluster_labels = np.zeros((test_data.shape[0]), dtype=float)
-            for i in range(train_data.shape[0]):
-                train_cluster_index = np.argmin(train_distances[:, i])
-                train_cluster_labels[i] = train_cluster_index
-                test_cluster_index = np.argmin(test_distances[:, i])
-                test_cluster_labels[i] = test_cluster_index
-            train_cluster_labels = train_cluster_labels.astype(np.int64)
-            test_cluster_labels = test_cluster_labels.astype(np.int64)
+            train_cluster_labels = infer_cluster_label(train_distances, train_data.shape[0])
+            test_cluster_labels = infer_cluster_label(test_distances, test_data.shape[0])
 
             # Here we want to get rid of the embeddings that were not randomly picked by the next_batch()
             nonzero_train_indices = np.all(train_distances != 0, axis=0)

@@ -22,7 +22,7 @@ target = np.array([disease_mapping[d] for d in diseases])
 test_indices = read_list("split/ptb-images-2-cropped/test")
 train_indices = read_list("split/ptb-images-2-cropped/validation")
 
-n_samples = len(train_indices)
+n_samples = train_indices.shape[0]
 
 # Auto-encoder architecture
 input_size = 120576
