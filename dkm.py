@@ -5,6 +5,7 @@ __license__ = "GPL"
 
 import os
 import math
+from pathlib import Path
 import numpy as np
 import argparse
 import tensorflow as tf
@@ -13,6 +14,7 @@ from sklearn.metrics.cluster import normalized_mutual_info_score
 from sklearn.cluster import KMeans
 from utils import cluster_acc
 from compgraph import DkmCompGraph
+from utils import next_batch
 
 
 def print_cluster_metrics(ground_truths, cluster_labels, phase):
@@ -24,7 +26,7 @@ def print_cluster_metrics(ground_truths, cluster_labels, phase):
     ari = adjusted_rand_score(ground_truths, cluster_labels)
     print(f"{phase} ARI: {ari}")
     nmi = normalized_mutual_info_score(ground_truths, cluster_labels)
-    print(f"{phase} NMI: {nmi}")
+    print(f"{phase} NMI: {nmi}", flush=True)
 
 
 def infer_cluster_label(distances, data_size):
@@ -33,6 +35,18 @@ def infer_cluster_label(distances, data_size):
         cluster_index = np.argmin(distances[:, i])
         cluster_labels[i] = cluster_index
     return cluster_labels.astype(np.int64)
+
+
+def schedule_lr(this_epoch, max_epoch, compgraph):
+    lr_0 = 0.001
+    lr_1 = lr_0 / 10
+    lr_2 = lr_1 / 10
+    if this_epoch == 0:
+        sess.run(tf.compat.v1.assign(compgraph.lr, lr_0))
+    elif this_epoch == max_epoch * 12 // 25:
+        sess.run(tf.compat.v1.assign(compgraph.lr, lr_1))
+    elif this_epoch == max_epoch * 20 // 25:
+        sess.run(tf.compat.v1.assign(compgraph.lr, lr_2))
 
 
 parser = argparse.ArgumentParser(description="Deep k-means algorithm")
@@ -52,11 +66,6 @@ parser.add_argument("-e", "--p_epochs", type=int, default=50, help="Number of pr
 parser.add_argument("-f", "--f_epochs", type=int, default=5, help="Number of fine-tuning epochs per alpha value")
 parser.add_argument("-b", "--batch_size", type=int, default=256, help="Size of the minibatches used by the optimizer")
 args = parser.parse_args()
-
-if args.dataset == "PTB":
-    from ptb_img_utils import next_batch
-else:
-    from utils import next_batch
 
 # Dataset setting from arguments
 if args.dataset == "USPS":
@@ -126,7 +135,7 @@ config = tf.compat.v1.ConfigProto()
 # Definition of the randomly-drawn (0-10000) seeds to be used for each run
 seeds = [8905, 9129, 291, 4012, 1256, 6819, 4678, 6971, 1362, 575]
 
-n_runs = 1
+n_runs = 10
 for run in range(n_runs):
     tf.compat.v1.reset_default_graph()
     # Use a fixed seed for this run, as defined in the seed list
@@ -144,6 +153,7 @@ for run in range(n_runs):
         # Initialization
         init = tf.compat.v1.global_variables_initializer()
         sess.run(init)
+        writer = tf.compat.v1.summary.FileWriter(Path.cwd() / "deep-k-means" / "metrics", graph=sess.graph)
 
         # Pretrain if specified
         if pretrain:
@@ -156,9 +166,9 @@ for run in range(n_runs):
             # First, pretrain the autoencoder
             for epoch in range(n_pretrain_epochs):
                 print(f"Pretraining step: epoch {epoch}", flush=True)
+                schedule_lr(epoch, n_pretrain_epochs, cg)
 
                 for b in range(n_batches):
-                    print(f"Starting batch {b} out of {n_batches} batches.", flush=True)
                     # Fetch a random data batch of the specified size
                     train_indices, train_batch = next_batch(batch_size, train_data)
 
@@ -196,6 +206,9 @@ for run in range(n_runs):
             # The cluster centers are used to initialize the cluster representatives in DKM
             sess.run(tf.compat.v1.assign(cg.cluster_rep, kmeans_model.cluster_centers_))
 
+        writer.flush()
+        writer.close()
+
         # Variables to save tensor content
         train_distances = np.zeros((specs.n_clusters, train_data.shape[0]))
         test_distances = np.zeros((specs.n_clusters, test_data.shape[0]))
@@ -210,6 +223,7 @@ for run in range(n_runs):
         # Train the full DKM model
         for epoch in range(n_finetuning_epochs):
             print(f"Training step: epoch {epoch}", flush=True)
+            schedule_lr(epoch, n_finetuning_epochs, cg)
             # Loop over the samples
             for _ in range(n_batches):
                 # Fetch a random data batch of the specified size
@@ -240,17 +254,18 @@ for run in range(n_runs):
             nonzero_train_ground_truths = train_target[nonzero_train_indices]
             print_cluster_metrics(nonzero_train_ground_truths, nonzero_train_cluster_labels, "Train")
             # Evaluate the clustering performance every print_val alpha and for last alpha
-            print("train loss: ", train_loss_)
-            print("train auto encoder loss: ", ae_loss_)
-            print("train kmeans loss: ", train_kmeans_loss_)
+            print("Train loss: ", train_loss_)
+            print("Train auto encoder loss: ", ae_loss_)
+            print("Train kmeans loss: ", train_kmeans_loss_)
 
             nonzero_test_indices = np.all(test_distances != 0, axis=0)  # Col indices where all elements were 0
             nonzero_test_cluster_labels = test_cluster_labels[nonzero_test_indices]
             nonzero_test_ground_truths = test_target[nonzero_test_indices]
             print_cluster_metrics(nonzero_test_ground_truths, nonzero_test_cluster_labels, "Test")
-            print("test loss: ", test_loss_)
-            print("test auto encoder loss: ", test_ae_loss_)
-            print("test kmeans loss: ", test_kmeans_loss_)
+            print("Test loss: ", test_loss_)
+            print("Test auto encoder loss: ", test_ae_loss_)
+            print("Test kmeans loss: ", test_kmeans_loss_)
+            print("")
 
 # list_train_acc = np.array(list_train_acc)
 # print("Average validation ACC: {:.3f} +/- {:.3f}".format(np.mean(list_train_acc), np.std(list_train_acc)))

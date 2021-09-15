@@ -1,26 +1,22 @@
 import tensorflow as tf
 import numpy as np
+from pathlib import Path
 
-from ptb_img_utils import get_filenames_and_labels
+from ptb_img_utils import DISEASE_MAPPING
 from utils import read_list
 
-# Note that data here is only a list with filenames, not the actual images.
-data, diseases = get_filenames_and_labels("split/ptb-images-2-cropped")
+
+data_path = Path.cwd() / "deep-k-means" / "split" / "ptb-images-2-cropped"
+print("Loading data...")
+data = np.load(data_path / "compacted_data.npy").astype(np.uint8)
+diseases = np.load(data_path / "compacted_target.npy").astype(np.str)
+print("Done loading data")
 n_clusters = 7
-disease_mapping = {
-    "BundleBranchBlock": 0,
-    "Cardiomyopathy": 1,
-    "Dysrhythmia": 2,
-    "HealthyControl": 3,
-    "MyocardialInfarction": 4,
-    "Myocarditis": 5,
-    "ValvularHeartDisease": 6
-}
-target = np.array([disease_mapping[d] for d in diseases])
+target = np.asarray([DISEASE_MAPPING[d] for d in diseases])
 
 # Get the split between training/test set and validation set
-test_indices = read_list("split/ptb-images-2-cropped/test")
-train_indices = read_list("split/ptb-images-2-cropped/validation")
+test_indices = read_list(data_path / "test")
+train_indices = read_list(data_path / "validation")
 
 n_samples = train_indices.shape[0]
 

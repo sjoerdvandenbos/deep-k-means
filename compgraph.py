@@ -90,9 +90,10 @@ class DkmCompGraph(object):
         self.loss = self.ae_loss + val_lambda * self.kmeans_loss
 
         # The optimizer is defined to minimize this loss
-        optimizer = tf.compat.v1.train.AdamOptimizer()
-        self.pretrain_op = optimizer.minimize(self.ae_loss) # Pretrain the autoencoder before starting DKM
-        self.train_op = optimizer.minimize(self.loss) # Train the whole DKM model
+        self.lr = tf.compat.v1.Variable(initial_value=0.01, dtype=TF_FLOAT_TYPE, name="lr", trainable=False)
+        self.optimizer = tf.compat.v1.train.AdamOptimizer(self.lr)
+        self.pretrain_op = self.optimizer.minimize(self.ae_loss) # Pretrain the autoencoder before starting DKM
+        self.train_op = self.optimizer.minimize(self.loss) # Train the whole DKM model
 
 class AeCompGraph(object):
     """Computation graph for a fully-connected auto-encoder
