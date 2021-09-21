@@ -122,10 +122,15 @@ data = specs.data
 target = specs.target
 
 # Select only the labels which are to be used in the evaluation (disjoint for validation and test)
-train_target = target[specs.train_indices]
-train_data = data[specs.train_indices]
-test_target = target[specs.test_indices]
-test_data = data[specs.test_indices]
+# train_target = target[specs.train_indices]
+# train_data = data[specs.train_indices]
+# test_target = target[specs.test_indices]
+# test_data = data[specs.test_indices]
+
+train_target = target
+train_data = data
+test_target = target
+test_data = data
 
 # Hardware specifications
 if args.cpu:
@@ -153,7 +158,7 @@ for run in range(n_runs):
         # Initialization
         init = tf.compat.v1.global_variables_initializer()
         sess.run(init)
-        writer = tf.compat.v1.summary.FileWriter(Path.cwd() / "deep-k-means" / "metrics", graph=sess.graph)
+        writer = tf.compat.v1.summary.FileWriter(Path.cwd() / "metrics", graph=sess.graph)
 
         # Pretrain if specified
         if pretrain:
@@ -166,7 +171,7 @@ for run in range(n_runs):
             # First, pretrain the autoencoder
             for epoch in range(n_pretrain_epochs):
                 print(f"Pretraining step: epoch {epoch}", flush=True)
-                schedule_lr(epoch, n_pretrain_epochs, cg)
+                # schedule_lr(epoch, n_pretrain_epochs, cg)
 
                 for b in range(n_batches):
                     # Fetch a random data batch of the specified size
@@ -223,7 +228,7 @@ for run in range(n_runs):
         # Train the full DKM model
         for epoch in range(n_finetuning_epochs):
             print(f"Training step: epoch {epoch}", flush=True)
-            schedule_lr(epoch, n_finetuning_epochs, cg)
+            # schedule_lr(epoch, n_finetuning_epochs, cg)
             # Loop over the samples
             for _ in range(n_batches):
                 # Fetch a random data batch of the specified size
