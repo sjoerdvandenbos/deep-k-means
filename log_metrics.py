@@ -134,7 +134,7 @@ class Metrics:
 
 
 if __name__ == "__main__":
-    path = Path.cwd() / "ptb_img_log3.txt"
+    path = Path.cwd() / "mnist_reprod_log.txt"
     print(f"Reading from {path}")
     pretrain, pretest, finetrain, finetest = read_log(path)
 
