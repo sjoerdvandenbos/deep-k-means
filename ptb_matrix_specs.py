@@ -1,26 +1,16 @@
+from pathlib import Path
+
 import tensorflow as tf
 import numpy as np
-import pandas as pd
-import skimage.measure
 
-from ptb_img_utils import get_filenames_and_labels
 from utils import read_list
+from ptb_matrix_utils import get_matrix_data_from_npy
 
 
-# Note that data here is only a list with filenames, not the actual images.
-filenames, diseases = get_filenames_and_labels("split/ptb-matrices")
-
-print("loading matrix data", flush=True)
-
-data = []
-for f in filenames:
-    matrix = pd.read_csv(f, sep=",", header=None, nrows=15, low_memory=False, dtype=np.float64, engine="c").to_numpy()
-    reduced = skimage.measure.block_reduce(matrix, (1, 7), np.max, cval=-3)
-    data.append(reduced.flatten())
-data = np.asarray(data)
-
-print("matrix data loaded", flush=True)
-
+dataset_path = Path.cwd() / "split" / "ptb-matrices" / "3k_per_disease"
+data, diseases = get_matrix_data_from_npy(dataset_path)
+print(data.shape)
+print(diseases.shape)
 n_clusters = 7
 disease_mapping = {
     "BundleBranchBlock": 0,
@@ -31,11 +21,11 @@ disease_mapping = {
     "Myocarditis": 5,
     "ValvularHeartDisease": 6
 }
-target = np.array([disease_mapping[d] for d in diseases])
+target = np.fromiter((disease_mapping[d] for d in diseases), dtype=int)
 
 # Get the split between training/test set and validation set
-test_indices = read_list("split/ptb-matrices/test")
-train_indices = read_list("split/ptb-matrices/validation")
+test_indices = read_list(dataset_path / "test")
+train_indices = read_list(dataset_path / "validation")
 
 n_samples = len(train_indices)
 

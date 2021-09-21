@@ -6,10 +6,11 @@ from ptb_img_utils import DISEASE_MAPPING
 from utils import read_list
 
 
-data_path = Path.cwd() / "deep-k-means" / "split" / "ptb-images-2-cropped"
+data_path = Path.cwd() / "split" / "ptb-images-2-cropped" / "3k_per_disease"
 print("Loading data...")
-data = np.load(data_path / "compacted_data.npy").astype(np.uint8)
-diseases = np.load(data_path / "compacted_target.npy").astype(np.str)
+data = np.load(data_path / "compacted_data.npy").astype(np.uint8).reshape((-1, 120576)) / 255
+diseases = np.load(data_path / "compacted_target.npy").astype(np.str).flatten()
+print(data.shape)
 print("Done loading data")
 n_clusters = 7
 target = np.asarray([DISEASE_MAPPING[d] for d in diseases])

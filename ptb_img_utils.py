@@ -1,10 +1,13 @@
+import pandas as pd
 from PIL import Image
 import numpy as np
-import tensorflow as tf
 import skimage.measure
 
 from glob import glob
 from re import compile
+from pathlib import Path
+
+from utils import read_list
 
 # Pattern: any substring of characters only between a leading '_' and trailing '.'
 DISEASE_REGEX = compile(r"_[a-zA-z]*\.")
@@ -56,19 +59,16 @@ def get_image_tensor(path) -> np.ndarray:
     red, _, _ = image.split()
     cropped = np.array(red)[11:2209, 15:2703]
     # Reduce pixel range to [0, 1]
-    mapped = cropped / 255.0
-    reduced = skimage.measure.block_reduce(mapped, (7, 7), np.min)
-    return reduced.flatten()
+    reduced = skimage.measure.block_reduce(cropped, (7, 7), np.min)
+    return reduced.flatten().astype(np.uint8)
 
 
-if __name__ == "__main__":
-    from pathlib import Path
-    data_path = Path.cwd() / "split" / "ptb-images-2-cropped"
+def save_imgs_to_npy(path):
+    data_path = Path.cwd() / path
     print("Loading data into memory...", flush=True)
     filenames, diseases = get_filenames_and_labels(data_path)
-    data = np.asarray([get_image_tensor(f) for f in filenames])
+    data = np.asarray([get_image_tensor(f) for f in filenames], dtype=np.uint8)
     print("Writing to disk...", flush=True)
-    np.save(data_path / "compacted_data.npy", data)
-    np.save(data_path / "compacted_target.npy", diseases)
+    np.save(path / "compacted__data", data)
+    np.save(path / "compacted__target", diseases)
     print("Done!", flush=True)
-
