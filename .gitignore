@@ -1,0 +1,8 @@
+split/
+metrics/
+.idea/
+__pycache__/
+
+*.txt
+*.csv
+*.jpg
