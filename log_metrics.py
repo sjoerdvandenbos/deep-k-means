@@ -10,16 +10,15 @@ ACC_REGEX = compile(r"^(?:Test|Train) ACC: (?P<acc>[01]\.[0-9]+$)")
 ARI_REGEX = compile(r"ARI: (?P<ari>.*$)")
 NMI_REGEX = compile(r"NMI: (?P<nmi>.*$)")
 LOSS_REGEX = compile(r"^(?:Train|Test) loss: (?P<loss>.*$)")
-AE_LOSS_REGEX = compile(r"[Aa]uto encoder loss: (?P<ae_loss>.*$)")
+AE_LOSS_REGEX = compile(r"^(?:Train|Test) auto encoder loss: (?P<ae_loss>.*$)")
 KMEANS_LOSS_REGEX = compile(r"kmeans loss: (?P<kmeans_loss>.*$)")
 
 FINETUNING_REGEX = compile(r"^Training step: epoch [0-9]+$")
 PRETRAINING_REGEX = compile(r"^Pretraining step: epoch [0-9]+$")
-PRETRAIN_ACCIDENT_REGEX = compile(r"^Auto encoder loss: .*$")
 
 
 def read_log(filename):
-    log = open(Path.cwd() / filename, "r")
+    log = open(Path.cwd() / filename, "r", encoding="UTF-16 LE")
     pretrain_metrics = fill_list(Metrics, 10)
     pretest_metrics = fill_list(Metrics, 10)
     finetrain_metrics = fill_list(Metrics, 10)
@@ -48,7 +47,7 @@ def read_log(filename):
 
 
 def read_train_or_test_line(line, train_metrics, test_metrics):
-    if "Train" in line or PRETRAIN_ACCIDENT_REGEX.match(line):
+    if "Train" in line:
         read_line(line, train_metrics)
     elif "Test" in line:
         read_line(line, test_metrics)
@@ -69,10 +68,19 @@ def read_line(line, metrics):
         metrics.kmeans_losses.append(KMEANS_LOSS_REGEX.search(line).group("kmeans_loss"))
 
 
-def plot(metrics, phase):
-    for name in metrics.get_field_names():
-        metric_series = getattr(metrics, name)
-        plt.plot(metric_series)
+def plot(metrics, means, stddev, phase):
+    for name in means.get_field_names():
+        example_sample1 = getattr(metrics[0], name)
+        example_sample2 = getattr(metrics[4], name)
+        example_sample3 = getattr(metrics[9], name)
+        plt.plot(example_sample1, color="blue")
+        plt.plot(example_sample2, color="blue")
+        plt.plot(example_sample3, color="blue")
+        means_series = getattr(means, name)
+        deviation = getattr(stddev, name)
+        x = np.arange(0, len(means_series))
+        plt.fill_between(x, means_series + 2*deviation, means_series - 2*deviation, alpha=0.3)
+        plt.xlabel("epochs")
         plt.title(f"{phase} {name}")
         plt.savefig(Path.cwd() / "metrics" / f"{phase}_{name}.jpg")
         plt.close()
@@ -85,15 +93,21 @@ def average_runs(metrics_list, exclude_fields=[]):
     over all items n items.
     """
     averaged = Metrics()
+    stddev = Metrics()
     fields = [field for field in averaged.get_field_names() if field not in exclude_fields]
     runs = np.arange(0, 10)
-    samples_per_series = 50
+    samples_per_series = len(getattr(metrics_list[0], "accuracies"))
     for field in fields:
         new = np.zeros((runs.shape[0], samples_per_series))
         for run in runs:
             new[run, :] = getattr(metrics_list[run], field)
         setattr(averaged, field, np.mean(new, axis=0))
-    return averaged
+        variation = np.mean(new**2, axis=0) - np.mean(new, axis=0)**2
+        setattr(stddev, field, np.sqrt(variation))
+
+    averaged.convert_to_numpy()
+    stddev.convert_to_numpy()
+    return averaged, stddev
 
 
 def fill_list(filling, length):
@@ -109,6 +123,11 @@ def map_list_to_numpy(metrics_list):
     for metrics in metrics_list:
         metrics.convert_to_numpy()
     return metrics_list
+
+
+def fix_ae_loss(metrics_list):
+    for m in metrics_list:
+        m.ae_losses = m.losses - m.kmeans_losses
 
 
 class Metrics:
@@ -134,16 +153,17 @@ class Metrics:
 
 
 if __name__ == "__main__":
-    path = Path.cwd() / "mnist_reprod_log.txt"
+    path = Path.cwd() / "ptb_img3k_log6.txt"
     print(f"Reading from {path}")
     pretrain, pretest, finetrain, finetest = read_log(path)
+    fix_ae_loss(finetrain)
 
-    pretrain_avg = average_runs(pretrain, exclude_fields=["losses", "kmeans_losses"])
-    pretest_avg = average_runs(pretest, exclude_fields=["losses", "kmeans_losses", "ae_losses"])
-    finetrain_avg = average_runs(finetrain)
-    finetest_avg = average_runs(finetest)
+    pretrain_avg, pretrain_stddev = average_runs(pretrain, exclude_fields=["losses", "kmeans_losses"])
+    pretest_avg, pretest_stddev = average_runs(pretest, exclude_fields=["losses", "kmeans_losses", "ae_losses"])
+    finetrain_avg, finetrain_stddev = average_runs(finetrain)
+    finetest_avg, finetest_stddev = average_runs(finetest)
 
-    plot(pretrain_avg, "pretrain")
-    plot(pretest_avg, "pretest")
-    plot(finetrain_avg, "finetrain")
-    plot(finetest_avg, "finetest")
+    plot(pretrain, pretrain_avg, pretrain_stddev, "pretrain")
+    plot(pretest, pretest_avg, pretest_stddev, "pretest")
+    plot(finetrain, finetrain_avg, finetrain_stddev, "finetrain")
+    plot(finetest, finetest_avg, finetest_stddev, "finetest")
