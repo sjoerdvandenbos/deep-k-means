@@ -6,7 +6,7 @@ from ptb_img_utils import DISEASE_MAPPING
 from utils import read_list
 
 
-data_path = Path.cwd() / "split" / "ptb-images-2-cropped" / "3k_per_disease"
+data_path = Path.cwd() / "split" / "ptb-images-2-cropped" / "10k_per_disease"
 print("Loading data...")
 data = np.load(data_path / "compacted_data.npy").astype(np.uint8).reshape((-1, 120576)) / 255
 diseases = np.load(data_path / "compacted_target.npy").astype(np.str).flatten()

@@ -8,10 +8,10 @@ from utils import read_list
 from sklearn.datasets import fetch_openml
 
 # Fetch the dataset
-dataset = fetch_openml("mnist_784")
+dataset = fetch_openml("mnist_784", version=1, cache=True)
 print("Dataset MNIST loaded...")
-data = dataset.data.to_numpy()
-target = dataset.target.to_numpy()
+data = dataset.data
+target = dataset.target
 n_samples = data.shape[0] # Number of samples in the dataset
 n_clusters = 10 # Number of clusters to obtain
 
@@ -20,7 +20,7 @@ data = data / 255.0 # Normalize the levels of grey between 0 and 1
 
 # Get the split between training/test set and validation set
 test_indices = read_list("split/mnist/test")
-validation_indices = read_list("split/mnist/validation")
+train_indices = read_list("split/mnist/validation")
 
 # Auto-encoder architecture
 input_size = data.shape[1]

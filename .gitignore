@@ -1,9 +1,9 @@
 .idea
 .python-version
 __pycache__
-split/ptb-images-2-cropped/
-split/ptb-matrices/
+split
 metrics/
+
 
 *.txt
 *.csv

@@ -80,4 +80,4 @@ def save_npy(path, data, target):
 
 
 if __name__ == "__main__":
-    shrink_imgs_and_matrices(train_size=3000, test_size=1000, name="3k_per_disease")
+    shrink_imgs_and_matrices(train_size=10000, test_size=2000, name="10k_per_disease")

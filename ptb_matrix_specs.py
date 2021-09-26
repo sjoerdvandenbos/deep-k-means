@@ -7,7 +7,7 @@ from utils import read_list
 from ptb_matrix_utils import get_matrix_data_from_npy
 
 
-dataset_path = Path.cwd() / "split" / "ptb-matrices" / "3k_per_disease"
+dataset_path = Path.cwd() / "split" / "ptb-matrices" / "10k_per_disease"
 data, diseases = get_matrix_data_from_npy(dataset_path)
 print(data.shape)
 print(diseases.shape)

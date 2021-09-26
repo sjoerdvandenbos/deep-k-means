@@ -6,6 +6,7 @@ __license__ = "GPL"
 import os
 import math
 from pathlib import Path
+from datetime import datetime
 import numpy as np
 import argparse
 import tensorflow as tf
@@ -15,6 +16,7 @@ from sklearn.cluster import KMeans
 from utils import cluster_acc
 from compgraph import DkmCompGraph
 from utils import next_batch
+from ptb_img_utils import reconstruct_image
 
 
 def print_cluster_metrics(ground_truths, cluster_labels, phase):
@@ -95,8 +97,8 @@ pretrain = args.pretrain # Specify if DKM's autoencoder should be pretrained
 annealing = args.annealing # Specify if annealing should be used
 seeded = args.seeded # Specify if runs are seeded
 
-print("Hyperparameters...")
-print("lambda =", lambda_)
+print(f"Hyperparameters: lambda={lambda_}, pretrain_epochs={n_pretrain_epochs}, finetune_epochs="
+      f"{n_finetuning_epochs}, batch_size={batch_size}")
 
 # Define the alpha scheme depending on if the approach includes annealing/pretraining
 if annealing and not pretrain:
@@ -202,7 +204,7 @@ for run in range(n_runs):
                 train_cluster_labels = kmeans_model.labels_
                 test_cluster_labels = kmeans_model.predict(test_nonzeros)
 
-                print(f"Auto encoder loss: {ae_loss_}")
+                print(f"Train auto encoder loss: {ae_loss_}")
                 print_cluster_metrics(train_ground_truths, train_cluster_labels, "Train")
                 print_cluster_metrics(test_ground_truths, test_cluster_labels, "Test")
                 print("", flush=True)
@@ -210,6 +212,20 @@ for run in range(n_runs):
 
             # The cluster centers are used to initialize the cluster representatives in DKM
             sess.run(tf.compat.v1.assign(cg.cluster_rep, kmeans_model.cluster_centers_))
+            # Visualize auto encoder input and respective output
+            if args.dataset == "PTB":
+                img_shape = [314, 384]
+                now = datetime.now()
+                random_indices = np.random.choice(data.shape[0], size=3)
+                rand_input = data[random_indices, :]
+                ae_output = sess.run(cg.output, feed_dict={cg.input: rand_input})
+                for i in range(len(random_indices)):
+                    input_img = reconstruct_image(rand_input[i, :], img_shape)
+                    output_img = reconstruct_image(ae_output[i, :], img_shape)
+                    input_img.save(Path.cwd() / "metrics" / f"input{i}_e{n_pretrain_epochs}_bs{batch_size}"
+                                                            f"_{now.isoformat()}")
+                    output_img.save(Path.cwd() / "metrics" / f"output{i}_e{n_pretrain_epochs}_bs{batch_size}"
+                                                             f"_{now.isoformat()}")
 
         writer.flush()
         writer.close()

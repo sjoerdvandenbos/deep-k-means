@@ -2,12 +2,11 @@ import pandas as pd
 from PIL import Image
 import numpy as np
 import skimage.measure
+from matplotlib import cm
 
 from glob import glob
 from re import compile
 from pathlib import Path
-
-from utils import read_list
 
 # Pattern: any substring of characters only between a leading '_' and trailing '.'
 DISEASE_REGEX = compile(r"_[a-zA-z]*\.")
@@ -69,6 +68,11 @@ def save_imgs_to_npy(path):
     filenames, diseases = get_filenames_and_labels(data_path)
     data = np.asarray([get_image_tensor(f) for f in filenames], dtype=np.uint8)
     print("Writing to disk...", flush=True)
-    np.save(path / "compacted__data", data)
-    np.save(path / "compacted__target", diseases)
+    np.save(path / "compacted_data", data)
+    np.save(path / "compacted_target", diseases)
     print("Done!", flush=True)
+
+
+def reconstruct_image(pixel_vector: np.ndarray, shape):
+    numpy_right_shape = pixel_vector.reshape(shape)
+    return Image.fromarray(np.uint8(cm.gist_earth(numpy_right_shape) * 255))
