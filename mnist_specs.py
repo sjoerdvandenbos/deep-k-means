@@ -10,13 +10,10 @@ from sklearn.datasets import fetch_openml
 # Fetch the dataset
 dataset = fetch_openml("mnist_784", version=1, cache=True)
 print("Dataset MNIST loaded...")
-data = dataset.data
-target = dataset.target
+data = dataset.data.to_numpy()
+target = dataset.target.to_numpy()
 n_samples = data.shape[0] # Number of samples in the dataset
 n_clusters = 10 # Number of clusters to obtain
-
-# Pre-process the dataset
-data = data / 255.0 # Normalize the levels of grey between 0 and 1
 
 # Get the split between training/test set and validation set
 test_indices = read_list("split/mnist/test")
