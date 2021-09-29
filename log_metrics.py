@@ -18,7 +18,7 @@ PRETRAINING_REGEX = compile(r"^Pretraining step: epoch [0-9]+$")
 
 
 def read_log(filename):
-    log = open(Path.cwd() / filename, "r", encoding="UTF-16 LE")
+    log = open(Path.cwd() / filename, "r")
     pretrain_metrics = fill_list(Metrics, 10)
     pretest_metrics = fill_list(Metrics, 10)
     finetrain_metrics = fill_list(Metrics, 10)
@@ -147,13 +147,20 @@ class Metrics:
         self.aris = np.asarray(self.aris, dtype=float)
         self.nmis = np.asarray(self.nmis, dtype=float)
 
+    def deep_copy(self):
+        new = Metrics()
+        for field in self.get_field_names():
+            copy = np.array(getattr(self, field), copy=True)
+            setattr(new, field, copy)
+        return new
+
     def get_field_names(self):
         return [k for k, v in getmembers(Metrics())
                 if not k.startswith("_") and not ismethod(v)]
 
 
 if __name__ == "__main__":
-    path = Path.cwd() / "ptb_img3k_log6.txt"
+    path = Path.cwd() / "ptb_img10k_log7.txt"
     print(f"Reading from {path}")
     pretrain, pretest, finetrain, finetest = read_log(path)
     fix_ae_loss(finetrain)
