@@ -220,12 +220,13 @@ for run in range(n_runs):
                 rand_input = data[random_indices, :]
                 ae_output = sess.run(cg.output, feed_dict={cg.input: rand_input})
                 for i in range(len(random_indices)):
-                    input_img = reconstruct_image(rand_input[i, :], img_shape)
-                    output_img = reconstruct_image(ae_output[i, :], img_shape)
+                    input_img = reconstruct_image(rand_input[i, :], img_shape).convert("L")
+                    output_img = reconstruct_image(ae_output[i, :], img_shape).convert("L")
+                    time_format = "%Y_%m_%dT%H_%M"
                     input_img.save(Path.cwd() / "metrics" / f"input{i}_e{n_pretrain_epochs}_bs{batch_size}"
-                                                            f"_{now.isoformat()}")
+                                                            f"_{now.strftime(time_format)}.jpg")
                     output_img.save(Path.cwd() / "metrics" / f"output{i}_e{n_pretrain_epochs}_bs{batch_size}"
-                                                             f"_{now.isoformat()}")
+                                                             f"_{now.strftime(time_format)}.jpg")
 
         writer.flush()
         writer.close()
