@@ -25,7 +25,7 @@ def shrink_imgs_and_matrices(train_size, test_size, name):
 
 
 def get_resized_indices(new_size, old_indices, target):
-    path_iterator = (Path.cwd() / "split" / "ptb-matrices" / "train").glob("*")
+    path_iterator = (Path.cwd() / "split" / "ptb-matrices" / "train_samples").glob("*")
     disease_names = [e.name for e in path_iterator]
     names_to_indices = {name: [] for name in disease_names}
     # Fill names_to_indices
@@ -49,7 +49,7 @@ def write_smaller_npy(path, train_indices, test_indices, name):
     destination.mkdir(parents=False, exist_ok=True)
     save_npy(destination, data, target)
     # Write train indices
-    pd.DataFrame(np.arange(0, len(train_indices))).to_csv(destination / "validation", index=False, header=False)
+    pd.DataFrame(np.arange(0, len(train_indices))).to_csv(destination / "train", index=False, header=False)
     # Write test indices
     first_test_index = len(train_indices)
     last_test_index = len(train_indices) + len(test_indices)
@@ -80,4 +80,4 @@ def save_npy(path, data, target):
 
 
 if __name__ == "__main__":
-    shrink_imgs_and_matrices(train_size=10000, test_size=2000, name="10k_per_disease")
+    shrink_imgs_and_matrices(train_size=3000, test_size=600, name="3k_per_disease")
