@@ -6,21 +6,28 @@ __license__ = "GPL"
 import tensorflow as tf
 from utils import read_list
 from sklearn.datasets import fetch_openml
+from ptb_img_utils import PTBImgSet
+import numpy as np
 
 # Fetch the dataset
-dataset = fetch_openml("mnist_784", version=1, cache=True)
+download = fetch_openml("mnist_784", version=1, cache=True)
 print("Dataset MNIST loaded...")
-data = dataset.data.to_numpy()
-target = dataset.target.to_numpy()
+data = download.data.to_numpy()
+target = download.target.to_numpy().astype(np.int64)
 n_samples = data.shape[0] # Number of samples in the dataset
 n_clusters = 10 # Number of clusters to obtain
 
 # Get the split between training/test set and validation set
-test_indices = read_list("split/mnist/test")
-train_indices = read_list("split/mnist/validation")
+train_indices = read_list("split/mnist/train")
+test_indices = read_list("split/mnist/validation")
+
+trainset = PTBImgSet(data[train_indices], target[train_indices])
+testset = PTBImgSet(data[test_indices], target[test_indices])
 
 # Auto-encoder architecture
-input_size = data.shape[1]
+img_height = 28
+img_width = 28
+input_size = img_height * img_width
 hidden_1_size = 500
 hidden_2_size = 500
 hidden_3_size = 2000

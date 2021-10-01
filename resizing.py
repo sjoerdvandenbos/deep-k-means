@@ -13,9 +13,9 @@ def shrink_imgs_and_matrices(train_size, test_size, name):
     @param name: the name of the new dataset.
     """
     split_path = Path.cwd() / "split"
-    old_train_indices = pd.read_csv(split_path / "ptb-images-2-cropped" / "validation", header=None)\
+    old_train_indices = pd.read_csv(split_path / "ptb-images-2-cropped" / "train", header=None)\
         .to_numpy().flatten()
-    old_test_indices = pd.read_csv(split_path / "ptb-images-2-cropped" / "test", header=None)\
+    old_test_indices = pd.read_csv(split_path / "ptb-images-2-cropped" / "validation", header=None)\
         .to_numpy().flatten()
     target = np.load(split_path / "ptb-images-2-cropped" / "compacted_target.npy").flatten()
     new_train_indices = get_resized_indices(train_size, old_train_indices, target)

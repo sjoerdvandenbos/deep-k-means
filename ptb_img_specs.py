@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 from pathlib import Path
 
-from ptb_img_utils import DISEASE_MAPPING
+from ptb_img_utils import DISEASE_MAPPING, PTBImgSet
 from utils import read_list
 
 
@@ -10,19 +10,22 @@ data_path = Path.cwd() / "split" / "ptb-images-2-cropped" / "10k_per_disease"
 print("Loading data...")
 data = np.load(data_path / "compacted_data.npy").astype(np.uint8).reshape((-1, 120576)) / 255
 diseases = np.load(data_path / "compacted_target.npy").astype(np.str).flatten()
+dataset = PTBImgSet(data, diseases)
 print(data.shape)
 print("Done loading data")
 n_clusters = 7
 target = np.asarray([DISEASE_MAPPING[d] for d in diseases])
 
 # Get the split between training/test set and validation set
-test_indices = read_list(data_path / "test")
-train_indices = read_list(data_path / "validation")
+train_indices = read_list(data_path / "train")
+test_indices = read_list(data_path / "validation")
 
 n_samples = train_indices.shape[0]
 
 # Auto-encoder architecture
-input_size = 120576
+img_height = 314
+img_width = 384
+input_size = img_height * img_width
 hidden_1_size = 500
 hidden_2_size = 500
 hidden_3_size = 2000

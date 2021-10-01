@@ -26,10 +26,10 @@ def reduce_size(zipped, number_every_disease):
 
 
 if __name__ == "__main__":
-    train_image_dirs = sorted(glob.glob("split/ptb-images-2-cropped/train/*"))
-    train_csv_dirs = sorted(glob.glob("split/ptb-matrices/train/*"))
-    test_image_dirs = sorted(glob.glob("split/ptb-images-2-cropped/val/*"))
-    test_csv_dirs = sorted(glob.glob("split/ptb-matrices/val/*"))
+    train_image_dirs = sorted(glob.glob("split/ptb-images-2-cropped/train_samples/*"))
+    train_csv_dirs = sorted(glob.glob("split/ptb-matrices/train_samples/*"))
+    test_image_dirs = sorted(glob.glob("split/ptb-images-2-cropped/validation_samples/*"))
+    test_csv_dirs = sorted(glob.glob("split/ptb-matrices/validation_samples/*"))
 
     reduce_size(zip(train_image_dirs, train_csv_dirs), 1000)
     reduce_size(zip(test_image_dirs, test_csv_dirs), 256)
