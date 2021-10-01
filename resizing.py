@@ -53,7 +53,8 @@ def write_smaller_npy(path, train_indices, test_indices, name):
     # Write test indices
     first_test_index = len(train_indices)
     last_test_index = len(train_indices) + len(test_indices)
-    pd.DataFrame(np.arange(first_test_index, last_test_index)).to_csv(destination / "test", index=False, header=False)
+    pd.DataFrame(np.arange(first_test_index, last_test_index)).to_csv(destination / "validation", index=False,
+                                                                      header=False)
 
 
 def load_and_shrink_npy(path, train_indices, test_indices):
