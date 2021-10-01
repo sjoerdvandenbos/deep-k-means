@@ -3,7 +3,6 @@
 __author__ = "Thibaut Thonet, Maziar Moradi Fard"
 __license__ = "GPL"
 
-import os
 import math
 from pathlib import Path
 from datetime import datetime
@@ -11,17 +10,18 @@ import numpy as np
 import argparse
 
 import torch.cuda
+from matplotlib import pyplot as plt
+from sklearn.manifold import TSNE
 from torch.optim import Adam
 from sklearn.metrics.cluster import adjusted_rand_score
 from sklearn.metrics.cluster import normalized_mutual_info_score
 from sklearn.cluster import KMeans
-from utils import cluster_acc
-from utils import next_batch
-from ptb_img_utils import reconstruct_image, get_train_and_test_loaders, autoencoder_loss
-from Modules import FCAutoencoder, DeepKMeans
+from torch.utils.data import DataLoader
+from matplotlib.colors import TABLEAU_COLORS
 
-# Delete this import
-from ptb_img_utils import PTBImgSet, DataLoader
+from utils import cluster_acc
+from ptb_img_utils import reconstruct_image, autoencoder_loss
+from Modules import FCAutoencoder, DeepKMeans
 
 
 def print_cluster_metrics(ground_truths, cluster_labels, phase):
@@ -37,11 +37,11 @@ def print_cluster_metrics(ground_truths, cluster_labels, phase):
 
 
 def infer_cluster_label(distances, data_size):
-    cluster_labels = np.zeros(data_size, dtype=float)
+    cluster_labels = torch.zeros(data_size, dtype=float)
     for i in range(data_size):
-        cluster_index = np.argmin(distances[:, i])
+        cluster_index = torch.argmin(distances[:, i])
         cluster_labels[i] = cluster_index
-    return cluster_labels.astype(np.int64)
+    return cluster_labels
 
 
 parser = argparse.ArgumentParser(description="Deep k-means algorithm")
@@ -89,50 +89,15 @@ validation = args.validation # Specify if data should be split into validation a
 pretrain = args.pretrain # Specify if DKM's autoencoder should be pretrained
 annealing = args.annealing # Specify if annealing should be used
 seeded = args.seeded # Specify if runs are seeded
+test_size = batch_size
 
 print(f"Hyperparameters: lambda={lambda_}, pretrain_epochs={n_pretrain_epochs}, finetune_epochs="
       f"{n_finetuning_epochs}, batch_size={batch_size}")
-
-# Define the alpha scheme depending on if the approach includes annealing/pretraining
-if annealing and not pretrain:
-    constant_value = 1  # specs.embedding_size # Used to modify the range of the alpha scheme
-    max_n = 40  # Number of alpha values to consider
-    alphas = np.zeros(max_n, dtype=float)
-    alphas[0] = 0.1
-    for i in range(1, max_n):
-        alphas[i] = (2 ** (1 / (np.log(i + 1)) ** 2)) * alphas[i - 1]
-    alphas = alphas / constant_value
-elif not annealing and pretrain:
-    constant_value = 1  # specs.embedding_size # Used to modify the range of the alpha scheme
-    max_n = 1  # Number of alpha values to consider (constant values are used here)
-    alphas = 1000*np.ones(max_n, dtype=float) # alpha is constant
-    alphas = alphas / constant_value
-else:
-    parser.error("Run with either annealing (-a) or pretraining (-p), but not both.")
-    exit()
-
-
-# Dataset on which the computation graph will be run
-data = specs.data
-target = specs.target
-
-# Select only the labels which are to be used in the evaluation (disjoint for validation and test)
-# train_target = target[specs.train_indices]
-# train_data = data[specs.train_indices]
-# test_target = target[specs.test_indices]
-# test_data = data[specs.test_indices]
-
-train_target = target
-train_data = data
-test_target = target
-test_data = data
-# train_iter, test_iter = get_train_and_test_iterators(Path.cwd() / "split" / "ptb-img" / "3k", 256, 100)
 
 # Hardware specifications
 device = "cuda" if torch.cuda.is_available() else "cpu"
 if args.cpu:
     device = "cpu"
-    os.environ['CUDA_VISIBLE_DEVICES'] = '-1' # Run on CPU instead of GPU if batch_size is small
 
 # Definition of the randomly-drawn (0-10000) seeds to be used for each run
 seeds = [8905, 9129, 291, 4012, 1256, 6819, 4678, 6971, 1362, 575]
@@ -141,114 +106,133 @@ n_runs = 1
 for run in range(n_runs):
     print("Run", run)
 
-    dataset = PTBImgSet(data, target)
+    if seeded:
+        torch.manual_seed(seeds[run])
+        np.random.seed(seeds[run])
+
+    trainset, testset = specs.trainset, specs.testset
     autoencoder = FCAutoencoder(dimensions=specs.dimensions)
     autoencoder.to(device)
     optimizer = Adam(autoencoder.parameters(), 0.001)
-    loss = autoencoder_loss
     kmeans_model = None
-    if pretrain:
-        print("Starting autoencoder pretraining...")
+
+    print("Starting autoencoder pretraining...")
+    for epoch in range(n_pretrain_epochs):
+        print(f"Pretraining step: epoch {epoch}", flush=True)
+        train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
+        train_embeddings = torch.zeros((len(trainset), specs.embedding_size), dtype=torch.float)
+        ae_losses = []
         autoencoder.train()
+        for train_indices, train_batch, _ in train_loader:
+            train_batch = train_batch.to(device)
 
-        for epoch in range(n_pretrain_epochs):
-            print(f"Pretraining step: epoch {epoch}", flush=True)
-            train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-            train_embeddings = np.zeros((train_data.shape[0], specs.embedding_size), dtype=float)
-            test_embeddings = np.zeros((test_data.shape[0], specs.embedding_size), dtype=float)
-            ae_losses = []
-            for train_indices, train_batch, _ in train_loader:
-                train_batch = train_batch.to(device)
+            # Train one mini-batch
+            optimizer.zero_grad()
+            train_embedding_, reconstruction = autoencoder.forward(train_batch)
+            train_ae_loss_ = autoencoder_loss(train_batch, reconstruction)
+            train_ae_loss_.backward()
+            optimizer.step()
 
-                # Train one mini-batch
-                autoencoder.zero_grad()
-                train_embedding_, reconstruction = autoencoder.forward(train_batch)
-                train_ae_loss_ = loss(train_batch, reconstruction)
-                train_ae_loss_.backward()
-                optimizer.step()
+            # Save metrics to cpu memory
+            ae_losses.append(train_ae_loss_.item())
+            train_embeddings[train_indices, :] = train_embedding_.detach().cpu()
 
-                # Save metrics to cpu memory
-                train_embedding_ = train_embedding_.cpu().detach().numpy()
-                ae_losses.append(train_ae_loss_.item())
-                for j in range(len(train_embedding_)):
-                    train_embeddings[train_indices[j], :] = train_embedding_[j, :]
-                    # test_embeddings[test_indices[j], :] = test_embedding_[j, :]
-
-            kmeans_model = KMeans(n_clusters=specs.n_clusters, init="k-means++").fit(train_embeddings)
-            train_cluster_labels = kmeans_model.labels_
-            # test_cluster_labels = kmeans_model.predict(test_nonzeros)
-
-            print(f"Train auto encoder loss: {sum(ae_losses) / n_batches}")
-            print_cluster_metrics(target, train_cluster_labels, "Train")
-            # print_cluster_metrics(test_ground_truths, test_cluster_labels, "Test")
-            print("", flush=True)
-
-
-        # The cluster centers are used to initialize the cluster representatives in DKM
-        # sess.run(tf.compat.v1.assign(cg.cluster_rep, kmeans_model.cluster_centers_))
-        # Visualize auto encoder input and respective output
         autoencoder.eval()
-        if args.dataset == "PTB":
-            img_shape = [314, 384]
-            now = datetime.now()
-            random_indices = np.random.choice(data.shape[0], size=3)
-            rand_input = data[random_indices, :]
-            _, reconstruction = autoencoder.forward(rand_input)
-            for i in range(len(random_indices)):
-                input_img = reconstruct_image(rand_input[i, :], img_shape)
-                output_img = reconstruct_image(reconstruction[i, :], img_shape)
-                input_img.save(Path.cwd() / "metrics" / f"input{i}_e{n_pretrain_epochs}_bs{batch_size}"
-                                                        f"_{now.isoformat()}")
-                output_img.save(Path.cwd() / "metrics" / f"output{i}_e{n_pretrain_epochs}_bs{batch_size}"
-                                                         f"_{now.isoformat()}")
+        test_indices = np.random.choice(range(len(testset)), size=test_size)
+        test_batch = testset[test_indices][1].to(device)
+        test_embeddings, test_reconstruction = autoencoder.forward(test_batch)
+        test_embeddings, test_reconstruction = test_embeddings.detach().cpu(), test_reconstruction.detach().cpu()
+        test_batch = test_batch.detach().cpu()
 
-    # Variables to save tensor content
-    train_distances = np.zeros((specs.n_clusters, train_data.shape[0]))
-    test_distances = np.zeros((specs.n_clusters, test_data.shape[0]))
+        kmeans_model = KMeans(n_clusters=specs.n_clusters, init="k-means++").fit(train_embeddings)
+        train_cluster_labels = torch.from_numpy(kmeans_model.labels_).long()
+        test_cluster_labels = torch.from_numpy(kmeans_model.predict(test_embeddings))
+
+        print(f"Train auto encoder loss: {sum(ae_losses) / n_batches}")
+        print_cluster_metrics(trainset.target, train_cluster_labels, "Train")
+        print(f"Test auto encoder loss: {autoencoder_loss(test_batch, test_reconstruction)}")
+        print_cluster_metrics(testset.target[test_indices], test_cluster_labels, "Test")
+        print("", flush=True)
+
+    # Visualize auto encoder input and respective output
+    img_shape = [specs.img_height, specs.img_width]
+    now = datetime.now()
+    time_format = "%Y_%m_%dT%H_%M"
+    index = np.random.choice(len(testset), size=1)
+    rand_input = testset[index][1].to(device)
+    reconstruction = autoencoder.forward(rand_input)[1].cpu().detach().numpy()
+    rand_input = rand_input.cpu().detach().numpy()
+    input_img = reconstruct_image(rand_input, img_shape).convert("L")
+    output_img = reconstruct_image(reconstruction, img_shape, transform=True).convert("L")
+    fig, (ax1, ax2) = plt.subplots(1, 2)
+    ax1.imshow(input_img)
+    ax1.set_title("input")
+    ax2.imshow(output_img)
+    ax2.set_title("reconstruction")
+    fig.savefig(
+        Path.cwd() / "metrics" / f"input_e{n_pretrain_epochs}_bs{batch_size}_{now.strftime(time_format)}.jpg")
+
+    # Visualize embedding space using t-SNE
+    centers = torch.from_numpy(kmeans_model.cluster_centers_)
+    test_embeds_and_centers = torch.cat((test_embeddings, centers))
+    fitted = TSNE(n_components=2, learning_rate='auto', init='random').fit_transform(test_embeds_and_centers)
+    mapped_embeds, mapped_centers = fitted[:test_size, :], fitted[test_size:, :]
+    colors = [*TABLEAU_COLORS.values()]
+    color_map = {i: colors[i] for i in range(specs.embedding_size)}
+    color_labels = [color_map[t.item()] for t in test_cluster_labels]
+    fig2, ax3 = plt.subplots()
+    for i in range(test_size):
+        ax3.plot(mapped_embeds[i, 0], mapped_embeds[i, 1], ".", color=color_labels[i])
+    for j in range(len(mapped_centers)):
+        ax3.plot(mapped_centers[j, 0], mapped_centers[j, 1], "o", color=colors[j], label=f"{j}")
+    ax3.legend()
+    fig2.savefig(Path.cwd() / "metrics" / f"torch_centers{now.strftime(time_format)}.jpg")
 
     # Train the full DKM model
+    train_distances = torch.zeros((specs.n_clusters, len(trainset)))
     cluster_centers = torch.from_numpy(kmeans_model.cluster_centers_).to(device)
+    cluster_centers.requires_grad = True
     deepkmeans = DeepKMeans(autoencoder, cluster_centers)
-    deepkmeans.train()
     optimizer = Adam(deepkmeans.parameters(), 0.001)
     for epoch in range(n_finetuning_epochs):
-        train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
         train_kmeans_losses, train_ae_losses = [], []
+
+        deepkmeans.train()
         print(f"Training step: epoch {epoch}", flush=True)
         for train_indices, train_batch, _ in train_loader:
             train_batch = train_batch.to(device)
 
             # Train one mini-batch
-            deepkmeans.zero_grad()
-            train_kmeans_distance_, train_reconstruction = deepkmeans.forward(train_batch)
+            optimizer.zero_grad()
+            train_kmeans_distance_, stack_dist, train_reconstruction = deepkmeans.forward(train_batch)
             train_ae_loss_ = autoencoder_loss(train_batch, train_reconstruction)
             train_kmeans_loss_ = train_kmeans_distance_.sum(dim=0).mean()
             total_train_loss_ = train_ae_loss_ + train_kmeans_loss_
             total_train_loss_.backward()
             optimizer.step()
 
-            # Save metrics to cpu memory
-            train_ae_loss_ = train_ae_loss_.cpu().detach().numpy()
-            train_kmeans_loss_ = train_kmeans_loss_.cpu().detach().numpy()
-            train_kmeans_distance_ = train_kmeans_distance_.cpu().detach().numpy()
-            train_kmeans_losses.append(train_kmeans_loss_)
-            train_ae_losses.append(train_ae_loss_)
-            for j in range(len(train_indices)):
-                train_distances[:, train_indices[j]] = train_kmeans_distance_[:, j]
-                # test_distances[:, test_indices[j]] = test_stack_dist_[:, j]
+            train_kmeans_losses.append(train_kmeans_loss_.cpu())
+            train_ae_losses.append(train_ae_loss_.cpu())
+            train_distances[:, train_indices] = stack_dist.detach().cpu().float()
 
-
-        train_cluster_labels = infer_cluster_label(train_distances, train_data.shape[0])
-        # test_cluster_labels = infer_cluster_label(test_distances, test_data.shape[0])
-        print_cluster_metrics(target, train_cluster_labels, "Train")
-        # Evaluate the clustering performance every print_val alpha and for last alpha
+        train_cluster_labels = infer_cluster_label(train_distances, len(trainset)).cpu().long()
+        print_cluster_metrics(trainset.target, train_cluster_labels, "Train")
         train_ae, train_kmeans = sum(train_ae_losses) / n_batches, sum(train_kmeans_losses) / n_batches
         print(f"Train loss: {train_ae + train_kmeans}")
         print(f"Train auto encoder loss: {train_ae}")
         print(f"Train kmeans loss: {train_kmeans}")
 
-        # print_cluster_metrics(target, test_cluster_labels, "Test")
-        # print("Test loss: ", test_loss_)
-        # print("Test auto encoder loss: ", test_ae_loss_)
-        # print("Test kmeans loss: ", test_kmeans_loss_)
-        # print("")
+        deepkmeans.eval()
+        test_indices = np.random.choice(range(len(testset)), size=test_size)
+        test_batch = testset[test_indices][1].to(device)
+        test_kmeans_distance, test_stack_dist, test_reconstruction = deepkmeans.forward(test_batch)
+        test_ae_loss = autoencoder_loss(test_batch, test_reconstruction).item()
+        test_kmeans_loss = test_kmeans_distance.sum(dim=0).mean().item()
+        total_test_loss = test_ae_loss + test_kmeans_loss
+        test_cluster_labels = infer_cluster_label(test_stack_dist, test_size).cpu().long()
+        print_cluster_metrics(testset.target[test_indices], test_cluster_labels, "Test")
+        print("Test loss: ", total_test_loss)
+        print("Test auto encoder loss: ", test_ae_loss)
+        print("Test kmeans loss: ", test_kmeans_loss)
+        print("", flush=True)

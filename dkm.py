@@ -7,6 +7,7 @@ import os
 import math
 from pathlib import Path
 from datetime import datetime
+import matplotlib.pyplot as plt
 import numpy as np
 import argparse
 import tensorflow as tf
@@ -17,6 +18,7 @@ from utils import cluster_acc
 from compgraph import DkmCompGraph
 from utils import next_batch
 from ptb_img_utils import reconstruct_image
+from sklearn.manifold import TSNE
 
 
 def print_cluster_metrics(ground_truths, cluster_labels, phase):
@@ -142,7 +144,7 @@ config = tf.compat.v1.ConfigProto()
 # Definition of the randomly-drawn (0-10000) seeds to be used for each run
 seeds = [8905, 9129, 291, 4012, 1256, 6819, 4678, 6971, 1362, 575]
 
-n_runs = 10
+n_runs = 1
 for run in range(n_runs):
     tf.compat.v1.reset_default_graph()
     # Use a fixed seed for this run, as defined in the seed list
@@ -212,21 +214,26 @@ for run in range(n_runs):
 
             # The cluster centers are used to initialize the cluster representatives in DKM
             sess.run(tf.compat.v1.assign(cg.cluster_rep, kmeans_model.cluster_centers_))
+
             # Visualize auto encoder input and respective output
-            if args.dataset == "PTB":
-                img_shape = [314, 384]
-                now = datetime.now()
-                random_indices = np.random.choice(data.shape[0], size=3)
-                rand_input = data[random_indices, :]
-                ae_output = sess.run(cg.output, feed_dict={cg.input: rand_input})
-                for i in range(len(random_indices)):
-                    input_img = reconstruct_image(rand_input[i, :], img_shape).convert("L")
-                    output_img = reconstruct_image(ae_output[i, :], img_shape).convert("L")
-                    time_format = "%Y_%m_%dT%H_%M"
-                    input_img.save(Path.cwd() / "metrics" / f"input{i}_e{n_pretrain_epochs}_bs{batch_size}"
-                                                            f"_{now.strftime(time_format)}.jpg")
-                    output_img.save(Path.cwd() / "metrics" / f"output{i}_e{n_pretrain_epochs}_bs{batch_size}"
-                                                             f"_{now.strftime(time_format)}.jpg")
+            img_shape = [28, 28]
+            now = datetime.now()
+            time_format = "%Y_%m_%dT%H_%M"
+            random_indices = np.random.choice(data.shape[0], size=3)
+            rand_input = data[random_indices, :]
+            ae_output = sess.run(cg.output, feed_dict={cg.input: rand_input})
+            for i in range(len(random_indices)):
+                input_img = reconstruct_image(rand_input[i, :], img_shape).convert("L")
+                output_img = reconstruct_image(ae_output[i, :], img_shape).convert("L")
+                input_img.save(Path.cwd() / "metrics" / f"input{i}_e{n_pretrain_epochs}_bs{batch_size}"
+                                                        f"_{now.strftime(time_format)}.jpg")
+                output_img.save(Path.cwd() / "metrics" / f"output{i}_e{n_pretrain_epochs}_bs{batch_size}"
+                                                         f"_{now.strftime(time_format)}.jpg")
+
+            fitted = TSNE(n_components=2, learning_rate='auto', init='random')\
+                .fit_transform(kmeans_model.cluster_centers_)
+            plt.plot(fitted[:, 0], fitted[:, 1],"o", color="black")
+            plt.savefig(Path.cwd() / "metrics" / f"tf_centers{now.strftime(time_format)}.jpg")
 
         writer.flush()
         writer.close()
@@ -254,7 +261,16 @@ for run in range(n_runs):
                 _, train_loss_, train_stack_dist_, cluster_rep_, train_ae_loss_, train_kmeans_loss_ =\
                     sess.run((cg.train_op, cg.loss, cg.stack_dist, cg.cluster_rep, cg.ae_loss, cg.kmeans_loss),
                              feed_dict={cg.input: train_batch, cg.alpha: alphas[0]})
-                del train_batch, _
+
+                sdist, mindist, sumexp, weighteddist = sess.run([cg.stack_dist, cg.min_dist, cg.sum_exponentials,
+                                                                 cg.stack_weighted_dist], feed_dict={cg.input:
+                                                                 train_batch, cg.alpha: alphas[0]})
+
+                # print(f"stack_dist: {sdist.shape}")
+                # print(f"min_dist: {mindist[0]}")
+                # print(f"sum_exponentials: {sumexp.shape}")
+                # print(f"stack_weighted_dist: {weighteddist.shape}")
+
 
                 test_indices, test_batch = next_batch(batch_size, test_data)
                 test_loss_, test_stack_dist_, test_ae_loss_, test_kmeans_loss_ =\
@@ -265,7 +281,6 @@ for run in range(n_runs):
                 for j in range(batch_size):
                     train_distances[:, train_indices[j]] = train_stack_dist_[:, j]
                     test_distances[:, test_indices[j]] = test_stack_dist_[:, j]
-
 
             train_cluster_labels = infer_cluster_label(train_distances, train_data.shape[0])
             test_cluster_labels = infer_cluster_label(test_distances, test_data.shape[0])

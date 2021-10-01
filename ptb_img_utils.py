@@ -3,7 +3,7 @@ from PIL import Image
 import numpy as np
 import skimage.measure
 from matplotlib import cm
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 from glob import glob
 from re import compile
@@ -77,30 +77,36 @@ def save_imgs_to_npy(path):
     print("Done!", flush=True)
 
 
-def reconstruct_image(pixel_vector: np.ndarray, shape):
+def reconstruct_image(pixel_vector: np.ndarray, shape, transform=False):
+    """" Returns 2d numpy array with pixel vals distributed N(0.5; 255/2) """
     numpy_right_shape = pixel_vector.reshape(shape)
-    return Image.fromarray(np.uint8(cm.gist_earth(numpy_right_shape) * 255))
+    if transform:
+        mean = np.mean(numpy_right_shape)
+        stddev = np.std(numpy_right_shape)
+        transformed = ((numpy_right_shape - mean) / (4. * stddev) + 0.5)
+        return Image.fromarray(np.uint8(cm.gist_earth(transformed) * 255))
+    else:
+        return Image.fromarray(np.uint8(cm.gist_earth(numpy_right_shape) * 255))
 
 
 class PTBImgSet(Dataset):
 
     def __init__(self, source: np.ndarray, target: np.ndarray):
-        self.data = source
-        self.target = target
+        self.data = torch.as_tensor(source)
+        self.target = torch.as_tensor(target)
 
     def __getitem__(self, index):
-        transformed = (self.data[index] / 255).astype(np.float32)
-        item = torch.from_numpy(transformed)
-        return index, item, self.target[index]
+        transformed = (self.data[index] / 255).float()
+        return index, transformed, self.target[index]
 
     def __len__(self):
         return self.data.shape[0]
 
 
-def get_train_and_test_loaders(path: Path, batch_size_train, batch_size_test):
+def get_train_and_test_sets(path: Path):
     all_data = np.load(path / "compacted_data.npy")
-    train_indices = read_list(path / "validation")
-    test_indices = read_list(path / "test")
+    train_indices = read_list(path / "train")
+    test_indices = read_list(path / "validation")
     train_data = all_data[train_indices]
     test_data = all_data[test_indices]
     all_targets = np.load(path / "compacted_target.npy")
@@ -110,14 +116,11 @@ def get_train_and_test_loaders(path: Path, batch_size_train, batch_size_test):
                               dtype=np.uint8)
     train_set = PTBImgSet(train_data, train_target)
     test_set = PTBImgSet(test_data, test_target)
-    return (
-        DataLoader(train_set, batch_size=batch_size_train, shuffle=True),
-        DataLoader(test_set, batch_size=batch_size_test, shuffle=True),
-    )
+    return train_set, test_set
 
 
 def autoencoder_loss(x, y):
-    return torch.square(x - y).sum()
+    return torch.square(x - y).sum(dim=0).mean()
 
 
 def kmeans_distance(x, y):

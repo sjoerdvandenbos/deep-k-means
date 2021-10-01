@@ -5,8 +5,9 @@ __license__ = "GPL"
 
 import numpy as np
 import os
-import tensorflow as tf
 from scipy.optimize import linear_sum_assignment as linear_assignment
+import tensorflow as tf
+import torch
 
 TF_FLOAT_TYPE = tf.float32
 
@@ -21,17 +22,16 @@ def cluster_acc(y_true, y_pred):
     # Return
         accuracy, in [0,1]
     """
-    y_true = y_true.astype(np.int64)
-    assert y_pred.size == y_true.size
-    D = max(y_pred.max(), y_true.max()) + 1
-    w = np.zeros((D, D), dtype=np.int64)
-    for i in range(y_pred.size):
+    assert y_pred.size(0) == y_true.size(0)
+    D = max(y_pred.max().item(), y_true.max().item()) + 1
+    w = torch.zeros((D, D), dtype=torch.long)
+    for i in range(y_pred.size(0)):
         w[y_pred[i], y_true[i]] += 1
     ind = linear_assignment(w.max() - w) # Optimal label mapping based on the Hungarian algorithm
 
     # ind is a tuple of arrays, we want an array of tuples
     indices = np.array([(ind[0][i], ind[1][i]) for i in range(len(ind[0]))])
-    return sum([w[i, j] for i, j in indices]) * 1.0 / y_pred.size
+    return sum([w[i, j] for i, j in indices]) * 1.0 / y_pred.size(0)
 
 
 def next_batch(num, data):
@@ -41,7 +41,7 @@ def next_batch(num, data):
     indices = np.arange(0, data.shape[0])
     np.random.shuffle(indices)
     indices = indices[:num]
-    batch_data = np.asarray([data[i, :] for i in indices])
+    batch_data = np.asarray([data[i, :] / 255 for i in indices])
 
     return indices, batch_data
 
