@@ -19,8 +19,8 @@ def split_indices(dataset: str) -> None:
     indices = np.arange(0, len(all_files))
     training = pd.DataFrame(indices[:first_test])
     testing = pd.DataFrame(indices[first_test:])
-    training.to_csv(f"split/{dataset}/validation", index=False, header=False)
-    testing.to_csv(f"split/{dataset}/test", index=False, header=False)
+    training.to_csv(f"split/{dataset}/train", index=False, header=False)
+    testing.to_csv(f"split/{dataset}/validation", index=False, header=False)
 
 
 if __name__ == "__main__":
