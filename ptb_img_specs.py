@@ -6,25 +6,26 @@ from ptb_img_utils import DISEASE_MAPPING, PTBImgSet
 from utils import read_list
 
 
-data_path = Path.cwd() / "split" / "ptb-images-2-cropped" / "10k_per_disease"
-print("Loading data...")
-data = np.load(data_path / "compacted_data.npy").astype(np.uint8).reshape((-1, 120576)) / 255
+data_path = Path.cwd() / "split" / "ptb-images-2-cropped" / "3k_per_disease"
+print("Loading PTB image set...")
+data = np.load(data_path / "compacted_data.npy").astype(np.uint8)
 diseases = np.load(data_path / "compacted_target.npy").astype(np.str).flatten()
-dataset = PTBImgSet(data, diseases)
-print(data.shape)
+target = np.fromiter((DISEASE_MAPPING[d] for d in diseases), dtype=np.int32)
 print("Done loading data")
+n_samples = target.shape[0]
+img_height = 314
+img_width = 384
 n_clusters = 7
-target = np.asarray([DISEASE_MAPPING[d] for d in diseases])
+data = data.reshape(n_samples, 1, img_height, img_width)
 
 # Get the split between training/test set and validation set
 train_indices = read_list(data_path / "train")
 test_indices = read_list(data_path / "validation")
 
-n_samples = train_indices.shape[0]
+trainset = PTBImgSet(data[train_indices], target[train_indices])
+testset = PTBImgSet(data[test_indices], target[test_indices])
 
 # Auto-encoder architecture
-img_height = 314
-img_width = 384
 input_size = img_height * img_width
 hidden_1_size = 500
 hidden_2_size = 500
