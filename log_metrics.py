@@ -19,15 +19,22 @@ PRETRAINING_REGEX = compile(r"^Pretraining step: epoch [0-9]+$")
 
 def read_log(filename):
     log = open(Path.cwd() / filename, "r")
-    pretrain_metrics = fill_list(Metrics, 10)
-    pretest_metrics = fill_list(Metrics, 10)
-    finetrain_metrics = fill_list(Metrics, 10)
-    finetest_metrics = fill_list(Metrics, 10)
+    pretrain_metrics = []
+    pretest_metrics = []
+    finetrain_metrics = []
+    finetest_metrics = []
     pretraining = False
     run = -1
     for line in log:
+        # Don't read before the training started
+        if run == -1 and not "Run" in line:
+            continue
         if "Run" in line:
             run += 1
+            pretrain_metrics.append(Metrics())
+            pretest_metrics.append(Metrics())
+            finetrain_metrics.append(Metrics())
+            finetest_metrics.append(Metrics())
 
         if PRETRAINING_REGEX.match(line):
             pretraining = True
@@ -70,12 +77,11 @@ def read_line(line, metrics):
 
 def plot(metrics, means, stddev, phase):
     for name in means.get_field_names():
-        example_sample1 = getattr(metrics[0], name)
-        example_sample2 = getattr(metrics[4], name)
-        example_sample3 = getattr(metrics[9], name)
-        plt.plot(example_sample1, color="blue")
-        plt.plot(example_sample2, color="blue")
-        plt.plot(example_sample3, color="blue")
+        n_examples = min(3, len(metrics))
+        rand_indices = np.random.choice(range(len(metrics)), n_examples)
+        for i in rand_indices:
+            example_sample = getattr(metrics[i], name)
+            plt.plot(example_sample, color="blue")
         means_series = getattr(means, name)
         deviation = getattr(stddev, name)
         x = np.arange(0, len(means_series))
@@ -95,7 +101,7 @@ def average_runs(metrics_list, exclude_fields=[]):
     averaged = Metrics()
     stddev = Metrics()
     fields = [field for field in averaged.get_field_names() if field not in exclude_fields]
-    runs = np.arange(0, 10)
+    runs = np.arange(0, len(metrics_list))
     samples_per_series = len(getattr(metrics_list[0], "accuracies"))
     for field in fields:
         new = np.zeros((runs.shape[0], samples_per_series))
@@ -108,11 +114,6 @@ def average_runs(metrics_list, exclude_fields=[]):
     averaged.convert_to_numpy()
     stddev.convert_to_numpy()
     return averaged, stddev
-
-
-def fill_list(filling, length):
-    """ Instanciates a list with specified filling and length. """
-    return [filling() for _ in range(length)]
 
 
 def map_list_to_numpy(metrics_list):
@@ -140,12 +141,12 @@ class Metrics:
         self.nmis = []
 
     def convert_to_numpy(self):
-        self.losses = np.asarray(self.losses, dtype=float)
-        self.ae_losses = np.asarray(self.ae_losses, dtype=float)
-        self.kmeans_losses = np.asarray(self.kmeans_losses, dtype=float)
-        self.accuracies = np.asarray(self.accuracies, dtype=float)
-        self.aris = np.asarray(self.aris, dtype=float)
-        self.nmis = np.asarray(self.nmis, dtype=float)
+        self.losses = np.array(self.losses, dtype=float)
+        self.ae_losses = np.array(self.ae_losses, dtype=float)
+        self.kmeans_losses = np.array(self.kmeans_losses, dtype=float)
+        self.accuracies = np.array(self.accuracies, dtype=float)
+        self.aris = np.array(self.aris, dtype=float)
+        self.nmis = np.array(self.nmis, dtype=float)
 
     def deep_copy(self):
         new = Metrics()
@@ -160,10 +161,10 @@ class Metrics:
 
 
 if __name__ == "__main__":
-    path = Path.cwd() / "ptb_img10k_log7.txt"
+    path = Path.cwd() / "metrics" / "PTB_e_50_f_100_bs_64_2021_10_03T21_48" /\
+           "log_PTB_e_50_f_100_bs_64_2021_10_03T21_48.txt"
     print(f"Reading from {path}")
     pretrain, pretest, finetrain, finetest = read_log(path)
-    fix_ae_loss(finetrain)
 
     pretrain_avg, pretrain_stddev = average_runs(pretrain, exclude_fields=["losses", "kmeans_losses"])
     pretest_avg, pretest_stddev = average_runs(pretest, exclude_fields=["losses", "kmeans_losses", "ae_losses"])
