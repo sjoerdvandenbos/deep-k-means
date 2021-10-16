@@ -61,16 +61,16 @@ def get_image_tensor(path) -> np.ndarray:
     # Image is black and white, so one channel will give all info needed
     red, _, _ = image.split()
     cropped = np.array(red)[11:2209, 15:2703]
-    # Reduce pixel range to [0, 1]
     reduced = skimage.measure.block_reduce(cropped, (7, 7), np.min)
-    return reduced.flatten().astype(np.uint8)
+    inverted = 255 - reduced
+    return inverted.astype(np.uint8)
 
 
 def save_imgs_to_npy(path):
     data_path = Path.cwd() / path
     print("Loading data into memory...", flush=True)
     filenames, diseases = get_filenames_and_labels(data_path)
-    data = np.asarray([get_image_tensor(f) for f in filenames], dtype=np.uint8)
+    data = np.array([get_image_tensor(f) for f in filenames], dtype=np.uint8)
     print("Writing to disk...", flush=True)
     np.save(path / "compacted_data", data)
     np.save(path / "compacted_target", diseases)
@@ -84,9 +84,9 @@ def reconstruct_image(pixel_vector: np.ndarray, shape, transform=False):
         mean = np.mean(numpy_right_shape)
         stddev = np.std(numpy_right_shape)
         transformed = ((numpy_right_shape - mean) / (4. * stddev) + 0.5)
-        return Image.fromarray(np.uint8(cm.gist_earth(transformed) * 255))
+        return Image.fromarray(np.uint8(cm.gray(transformed) * 255))
     else:
-        return Image.fromarray(np.uint8(cm.gist_earth(numpy_right_shape) * 255))
+        return Image.fromarray(np.uint8(cm.gray(numpy_right_shape) * 255))
 
 
 class PTBImgSet(Dataset):
@@ -123,5 +123,5 @@ def autoencoder_loss(x, y):
     return torch.square(x - y).sum(dim=0).mean()
 
 
-def kmeans_distance(x, y):
-    return torch.square(x - y).sum(dim=1)
+if __name__ == "__main__":
+    save_imgs_to_npy(Path.cwd() / "split" / "ptb-images-2-cropped")
