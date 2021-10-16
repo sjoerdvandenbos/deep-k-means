@@ -14,8 +14,11 @@ download = fetch_openml("mnist_784", version=1, cache=True)
 print("Dataset MNIST loaded...")
 data = download.data.to_numpy()
 target = download.target.to_numpy().astype(np.int64)
+img_height = 28
+img_width = 28
 n_samples = data.shape[0] # Number of samples in the dataset
 n_clusters = 10 # Number of clusters to obtain
+data = data.reshape(n_samples, 1, img_height, img_width)
 
 # Get the split between training/test set and validation set
 train_indices = read_list("split/mnist/train")
@@ -25,8 +28,6 @@ trainset = PTBImgSet(data[train_indices], target[train_indices])
 testset = PTBImgSet(data[test_indices], target[test_indices])
 
 # Auto-encoder architecture
-img_height = 28
-img_width = 28
 input_size = img_height * img_width
 hidden_1_size = 500
 hidden_2_size = 500
