@@ -34,6 +34,16 @@ def cluster_acc(y_true, y_pred):
     return sum([w[i, j] for i, j in indices]) * 1.0 / y_pred.size(0)
 
 
+def map_clusterlabels_to_groundtruth(clabel, gtruth):
+    """ Returns a map clabel -> gtruth. """
+    D = max(clabel.max().item(), gtruth.max().item()) + 1
+    w = torch.zeros((D, D), dtype=torch.long)
+    for i in range(clabel.size(0)):
+        w[clabel[i], gtruth[i]] += 1
+    ind = linear_assignment(w.max() - w) # Optimal label mapping based on the Hungarian algorithm
+    return dict(zip(ind))
+
+
 def next_batch(num, data):
     """
     Return a total of `num` random samples.
