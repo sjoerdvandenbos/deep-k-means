@@ -7,7 +7,7 @@ from utils import read_list
 from ptb_matrix_utils import get_matrix_data_from_npy
 
 
-dataset_path = Path.cwd() / "split" / "ptb-matrices" / "10k_per_disease"
+dataset_path = Path.cwd() / "split" / "ptb-matrices" / "3k_per_disease"
 data, diseases = get_matrix_data_from_npy(dataset_path)
 print(data.shape)
 print(diseases.shape)
@@ -24,8 +24,8 @@ disease_mapping = {
 target = np.fromiter((disease_mapping[d] for d in diseases), dtype=int)
 
 # Get the split between training/test set and validation set
-test_indices = read_list(dataset_path / "test")
-train_indices = read_list(dataset_path / "validation")
+test_indices = read_list(dataset_path / "validation")
+train_indices = read_list(dataset_path / "train")
 
 n_samples = len(train_indices)
 
