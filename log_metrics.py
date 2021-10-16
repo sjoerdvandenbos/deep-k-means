@@ -17,6 +17,33 @@ FINETUNING_REGEX = compile(r"^Training step: epoch [0-9]+$")
 PRETRAINING_REGEX = compile(r"^Pretraining step: epoch [0-9]+$")
 
 
+def write_visuals_and_summary(folder):
+    logfile = folder / "log.txt"
+    print(f"Reading from {logfile}")
+    pretrain, pretest, finetrain, finetest = read_log(logfile)
+
+    pretrain_avg, pretrain_stddev = average_runs(pretrain, exclude_fields=("losses", "kmeans_losses"))
+    pretest_avg, pretest_stddev = average_runs(pretest, exclude_fields=("losses", "kmeans_losses"))
+    finetrain_avg, finetrain_stddev = average_runs(finetrain)
+    finetest_avg, finetest_stddev = average_runs(finetest)
+
+    plot(pretrain, pretrain_avg, pretrain_stddev, "pretrain", folder)
+    plot(pretest, pretest_avg, pretest_stddev, "pretest", folder)
+    plot(finetrain, finetrain_avg, finetrain_stddev, "finetrain", folder)
+    plot(finetest, finetest_avg, finetest_stddev, "finetest", folder)
+
+    summary_lines = []
+    summary_lines.extend(summarize_results(
+        pretrain_avg, pretrain_stddev, "pretrain", exclude_fields=("losses", "kmeans_losses")))
+    summary_lines.extend(summarize_results(
+        pretest_avg, pretest_stddev, "pretest", exclude_fields=("losses", "kmeans_losses")))
+    summary_lines.extend(summarize_results(finetrain_avg, finetrain_stddev, "finetrain"))
+    summary_lines.extend(summarize_results(finetest_avg, finetest_stddev, "finetest"))
+    summary_file = folder / "summary.txt"
+    with summary_file.open("w+") as file:
+        file.writelines(summary_lines)
+
+
 def read_log(filename):
     log = open(Path.cwd() / filename, "r")
     pretrain_metrics = []
@@ -75,7 +102,7 @@ def read_line(line, metrics):
         metrics.kmeans_losses.append(KMEANS_LOSS_REGEX.search(line).group("kmeans_loss"))
 
 
-def plot(metrics, means, stddev, phase):
+def plot(metrics, means, stddev, phase, folder):
     for name in means.get_field_names():
         n_examples = min(3, len(metrics))
         rand_indices = np.random.choice(range(len(metrics)), n_examples)
@@ -88,11 +115,11 @@ def plot(metrics, means, stddev, phase):
         plt.fill_between(x, means_series + 2*deviation, means_series - 2*deviation, alpha=0.3)
         plt.xlabel("epochs")
         plt.title(f"{phase} {name}")
-        plt.savefig(Path.cwd() / "metrics" / f"{phase}_{name}.jpg")
+        plt.savefig(folder / f"{phase}_{name}.jpg")
         plt.close()
 
 
-def average_runs(metrics_list, exclude_fields=[]):
+def average_runs(metrics_list, exclude_fields=()):
     """
     @param metrics_list: A python list containing n instances of the Metrics class.
     @returns: A single instance of the Metrics class with metrics which are averaged
@@ -110,20 +137,26 @@ def average_runs(metrics_list, exclude_fields=[]):
         setattr(averaged, field, np.mean(new, axis=0))
         variation = np.mean(new**2, axis=0) - np.mean(new, axis=0)**2
         setattr(stddev, field, np.sqrt(variation))
+    return averaged.convert_to_numpy(), stddev.convert_to_numpy()
 
-    averaged.convert_to_numpy()
-    stddev.convert_to_numpy()
-    return averaged, stddev
+
+def summarize_results(avg_metrics, std_metrics, phase, exclude_fields=()):
+    summary_lines = [
+        f"{phase}\n",
+        "---------------------------\n"
+    ]
+    for field in avg_metrics.get_field_names():
+        if field not in exclude_fields:
+            avg = getattr(avg_metrics, field)[-1]
+            std = getattr(std_metrics, field)[-1]
+            result = f"{field}: {round(avg, 4)} +- {round(std, 4)}\n"
+            summary_lines.append(result)
+    summary_lines.append("\n")
+    return summary_lines
 
 
 def map_list_to_numpy(metrics_list):
-    """
-    Calls convert_to_numpy on all metrics objects in this list in place.
-    @returns: a pointer to the same list which was used as input.
-    """
-    for metrics in metrics_list:
-        metrics.convert_to_numpy()
-    return metrics_list
+    return [m.convert_to_numpy() for m in metrics_list]
 
 
 def fix_ae_loss(metrics_list):
@@ -141,12 +174,14 @@ class Metrics:
         self.nmis = []
 
     def convert_to_numpy(self):
-        self.losses = np.array(self.losses, dtype=float)
-        self.ae_losses = np.array(self.ae_losses, dtype=float)
-        self.kmeans_losses = np.array(self.kmeans_losses, dtype=float)
-        self.accuracies = np.array(self.accuracies, dtype=float)
-        self.aris = np.array(self.aris, dtype=float)
-        self.nmis = np.array(self.nmis, dtype=float)
+        result = Metrics()
+        result.losses = np.array(self.losses, dtype=float)
+        result.ae_losses = np.array(self.ae_losses, dtype=float)
+        result.kmeans_losses = np.array(self.kmeans_losses, dtype=float)
+        result.accuracies = np.array(self.accuracies, dtype=float)
+        result.aris = np.array(self.aris, dtype=float)
+        result.nmis = np.array(self.nmis, dtype=float)
+        return result
 
     def deep_copy(self):
         new = Metrics()
@@ -156,22 +191,14 @@ class Metrics:
         return new
 
     def get_field_names(self):
-        return [k for k, v in getmembers(Metrics())
+        return [k for k, v in getmembers(self)
                 if not k.startswith("_") and not ismethod(v)]
 
 
 if __name__ == "__main__":
-    path = Path.cwd() / "metrics" / "PTB_e_50_f_100_bs_64_2021_10_03T21_48" /\
-           "log_PTB_e_50_f_100_bs_64_2021_10_03T21_48.txt"
-    print(f"Reading from {path}")
-    pretrain, pretest, finetrain, finetest = read_log(path)
-
-    pretrain_avg, pretrain_stddev = average_runs(pretrain, exclude_fields=["losses", "kmeans_losses"])
-    pretest_avg, pretest_stddev = average_runs(pretest, exclude_fields=["losses", "kmeans_losses", "ae_losses"])
-    finetrain_avg, finetrain_stddev = average_runs(finetrain)
-    finetest_avg, finetest_stddev = average_runs(finetest)
-
-    plot(pretrain, pretrain_avg, pretrain_stddev, "pretrain")
-    plot(pretest, pretest_avg, pretest_stddev, "pretest")
-    plot(finetrain, finetrain_avg, finetrain_stddev, "finetrain")
-    plot(finetest, finetest_avg, finetest_stddev, "finetest")
+    import argparse
+    parser = argparse.ArgumentParser(description="Parser for generation of visuals and summary")
+    parser.add_argument("-d", "--directory", type=str, required=True, dest="directory")
+    args = parser.parse_args()
+    path = Path.cwd() / "metrics" / args.directory
+    write_visuals_and_summary(path)
