@@ -22,26 +22,21 @@ def cluster_acc(y_true, y_pred):
     # Return
         accuracy, in [0,1]
     """
-    assert y_pred.size(0) == y_true.size(0)
-    D = max(y_pred.max().item(), y_true.max().item()) + 1
-    w = torch.zeros((D, D), dtype=torch.long)
-    for i in range(y_pred.size(0)):
-        w[y_pred[i], y_true[i]] += 1
-    ind = linear_assignment(w.max() - w) # Optimal label mapping based on the Hungarian algorithm
-
-    # ind is a tuple of arrays, we want an array of tuples
-    indices = np.array([(ind[0][i], ind[1][i]) for i in range(len(ind[0]))])
-    return sum([w[i, j] for i, j in indices]) * 1.0 / y_pred.size(0)
+    correct = np.zeros_like(y_true)
+    for i in range(correct.shape[0]):
+        correct[i] = 1 if y_pred[i] == y_true[i] else 0
+    return sum(correct) / correct.shape[0]
 
 
-def map_clusterlabels_to_groundtruth(clabel, gtruth):
+def map_clusterlabels_to_groundtruth(gtruth, cluster_label):
     """ Returns a map clabel -> gtruth. """
-    D = max(clabel.max().item(), gtruth.max().item()) + 1
+    D = max(cluster_label.max().item(), gtruth.max().item()) + 1
     w = torch.zeros((D, D), dtype=torch.long)
-    for i in range(clabel.size(0)):
-        w[clabel[i], gtruth[i]] += 1
+    for i in range(cluster_label.size(0)):
+        w[cluster_label[i], gtruth[i]] += 1
     ind = linear_assignment(w.max() - w) # Optimal label mapping based on the Hungarian algorithm
-    return dict(zip(ind))
+    truth_map = dict(zip(ind[0], ind[1]))
+    return np.array([truth_map[e.item()] for e in cluster_label])
 
 
 def next_batch(num, data):

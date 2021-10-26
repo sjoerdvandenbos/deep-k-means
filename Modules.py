@@ -116,68 +116,71 @@ class ConvoAutoencoder(nn.Module):
 class DeepKMeans(nn.Module):
     def __init__(self, autoencoder, cluster_reps):
         super().__init__()
+        cluster_reps.requires_grad = True
+        self.cluster_reps = torch.nn.Parameter(cluster_reps)
         self.autoencoder = autoencoder
-        self.cluster_reps = cluster_reps
+
+    def _apply(self, fn):
+        super()._apply(fn)
+        fn(self.cluster_reps)
 
     def forward(self, x):
         """
-        Tensors are expanded to shape [batch_size, embedding_size, embedding_size]
-        in order to facilitate element-wise operations.
+        Tensors are expanded to shape [batch_size, embedding_size, embedding_size] and later to shape [batch_size,
+        embedding_size] in order to facilitate element-wise operations.
         """
-        embedding, reconstruction = self.autoencoder.forward(x)
         embedding_size = self.cluster_reps.shape[0]
-        batch_size = embedding.shape[0]
-        # list_dist = []
-        # for i in range(embedding_size):
-        #     dist = kmeans_distance(embedding, torch.reshape(self.cluster_reps[i, :], (1, embedding_size)))
-        #     list_dist.append(dist)
-        # stack_dist = torch.stack(list_dist)
+        batch_size = x.shape[0]
+        embedding, reconstruction = self.autoencoder.forward(x)
         distances = self._get_distances(embedding, batch_size)
-        min_dist = distances.min(dim=1, keepdim=True).expand(batch_size, embedding_size, embedding_size)
-
-        ## Compute exponentials shifted with min_dist to avoid underflow (0/0) issues in softmaxes
-        alpha = 1000
-        # list_exp = []
-        # for i in range(embedding_size):
-        #     exp = torch.exp(-alpha * (stack_dist[i] - min_dist))
-        #     list_exp.append(exp)
-        # stack_exp = torch.stack(list_exp)
+        # distances.shape = [batch_size, embedding_size]
+        min_dist = distances.min(dim=1, keepdim=True)[0].expand(-1, embedding_size)
+        # print(f"distances: {distances[0, :]}")
+        # print("\n\n")
+        # print(f"min_dist: {min_dist[0, :]}")
+        # min_dist.shape = [batch_size, embedding_size]
+        alpha = 1000.
         exponentials = self._compute_shifted_exps(alpha, distances, min_dist)
-        sum_exponentials = torch.sum(exponentials, dim=1, keepdim=True)\
-            .expand(batch_size, embedding_size, embedding_size)
-
-        ## Compute softmaxes and the embedding/representative distances weighted by softmax
-        # list_softmax = []
-        # list_weighted_dist = []
-        # for j in range(embedding_size):
-        #     softmax = exponentials[j] / sum_exponentials
-        #     weighted_dist = distances[j] * softmax
-        #     list_softmax.append(softmax)
-        #     list_weighted_dist.append(weighted_dist)
+        # print("\n\n")
+        # print(f"exponentials: {exponentials[0, :]}")
+        # exponentials.shape = [batch_size, embedding_size]
+        sum_exponentials = exponentials.sum(dim=1, keepdim=True).expand(-1, embedding_size)
+        # sum_exponentials.shape = [batch_size, embedding_size]
+        # print("\n\n")
+        # print(f"sum exponentials: {sum_exponentials[0, :]}")
         weighted_dists = self._compute_weighted_dists(distances, exponentials, sum_exponentials)
+        # print("\n\n")
+        # print(f"weighted_dists: {weighted_dists[0, :]}")
+        # exit()
+        # weighted_dists.shape = [batch_size, embedding_size]
         return weighted_dists, distances, reconstruction
 
     def _get_distances(self, embedding, batch_size):
+        """ Returns distances between embeddings and cluster reps. """
         embedding_size = self.cluster_reps.shape[0]
         repeated_cluster_reps = self.cluster_reps.view(1, embedding_size, embedding_size) \
-                                                   .expand(batch_size, embedding_size, embedding_size)
-        repeated_embedding = embedding.unsqueeze(1).expand(batch_size, embedding_size, embedding_size)
-        return self.kmeans_distance(repeated_embedding, repeated_cluster_reps)
+                                                   .expand(batch_size, -1, -1)
+        # print(f"repeated_cluster_reps: {repeated_cluster_reps[0, :, :]}")
+        # print("\n\n")
+        repeated_embedding = embedding.unsqueeze(1).expand(-1, embedding_size, -1)
+        # print(f"repeated_embeddings: {repeated_embedding[0 ,:, :]}")
+        res = self.cluster_distance(repeated_embedding, repeated_cluster_reps)
+        # print("\n\n")
+        # print(f'result: {res[0, :]}')
+        # exit()
+        return res.squeeze()
 
     @staticmethod
-    @torch.jit.script
-    def _compute_shifted_exps(alpha, stack_dist, min_dist):
+    def cluster_distance(x: torch.Tensor, y: torch.Tensor):
+        return torch.square(x - y).sum(dim=2, keepdim=True)
+
+    @staticmethod
+    def _compute_shifted_exps(alpha: float, distances: torch.Tensor, min_dist: torch.Tensor):
         """ Compute exponentials shifted with min_dist to avoid underflow (0/0) issues in softmaxes. """
-        return torch.exp(-alpha * (stack_dist - min_dist))
+        return torch.exp(-alpha * (distances - min_dist))
 
     @staticmethod
-    @torch.jit.script
-    def kmeans_distance(x, y):
-        return torch.square(x - y).sum(dim=1, keepdim=True)
-
-    @staticmethod
-    @torch.jit.script
-    def _compute_weighted_dists(distances, exponentials, sum_exponentials):
+    def _compute_weighted_dists(distances: torch.Tensor, exponentials: torch.Tensor, sum_exponentials: torch.Tensor):
         """
         Returns softmaxes and the embedding/representative distances weighted by softmax
         calculated as distances * softmaxes.

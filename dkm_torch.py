@@ -19,7 +19,7 @@ from sklearn.cluster import KMeans
 from torch.utils.data import DataLoader
 from matplotlib.colors import TABLEAU_COLORS
 
-from utils import cluster_acc
+from utils import cluster_acc, map_clusterlabels_to_groundtruth
 from ptb_img_utils import reconstruct_image, DISEASE_MAPPING
 from Modules import DeepKMeans
 
@@ -30,20 +30,17 @@ def print_cluster_metrics(ground_truths, cluster_labels, phase, write_files, log
     """
     @param phase: The phase of the experiment, either train or test.
     """
-    acc = cluster_acc(ground_truths, cluster_labels)
+    predictions = map_clusterlabels_to_groundtruth(ground_truths, cluster_labels)
+    acc = cluster_acc(ground_truths, predictions)
     log(f"{phase} ACC: {acc}", write_files, logfile)
-    ari = adjusted_rand_score(ground_truths, cluster_labels)
+    ari = adjusted_rand_score(ground_truths, predictions)
     log(f"{phase} ARI: {ari}", write_files, logfile)
-    nmi = normalized_mutual_info_score(ground_truths, cluster_labels)
+    nmi = normalized_mutual_info_score(ground_truths, predictions)
     log(f"{phase} NMI: {nmi}", write_files, logfile)
 
 
-def infer_cluster_label(distances, data_size):
-    cluster_labels = torch.zeros(data_size, dtype=torch.float)
-    for i in range(data_size):
-        cluster_index = torch.argmin(distances[:, i])
-        cluster_labels[i] = cluster_index
-    return cluster_labels
+def infer_cluster_label(distances):
+    return torch.argmin(distances, dim=1)
 
 
 def log(content, to_disc, path):
@@ -132,8 +129,9 @@ n_finetuning_epochs = args.f_epochs
 lambda_ = args.lambda_                                      # Value of hyperparam lambda balancing ae and kmeans losses
 batch_size = args.batch_size                                # Size of the mini-batches used in the stochastic optimizer
 test_size = batch_size
-n_batches = int(math.ceil(specs.n_samples / batch_size))    # Number of mini-batches
-n_test_batches = int(math.ceil(specs.n_samples / test_size))
+trainset, testset = specs.trainset, specs.testset
+n_batches = int(math.ceil(len(trainset) / batch_size))    # Number of mini-batches
+n_test_batches = int(math.ceil(len(testset) / test_size))
 seeded = args.seeded                                        # Specify if runs are seeded
 n_runs = args.number_runs
 write_files = args.write_files
@@ -148,7 +146,8 @@ if write_files:
 logfile = directory / "log.txt"
 
 log(f"Hyperparameters: lambda={lambda_}, pretrain_epochs={n_pretrain_epochs}, finetune_epochs={n_finetuning_epochs}, "
-    f"batch_size={batch_size}, autoencoder={args.autoencoder}, loss={args.loss}", write_files, logfile)
+    f"batch_size={batch_size}, autoencoder={args.autoencoder}, loss={args.loss}, lambda={args.lambda_}", write_files,
+    logfile)
 
 # Hardware specifications
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -164,15 +163,13 @@ for run in range(n_runs):
     if seeded:
         torch.manual_seed(seeds[run])
         np.random.seed(seeds[run])
-    trainset, testset = specs.trainset, specs.testset
-    autoencoder.to(device)
+    autoencoder = autoencoder.to(device)
     optimizer = torch.optim.Adam(autoencoder.parameters(), 0.001)
     kmeans_model = None
 
     for epoch in range(n_pretrain_epochs):
         log(f"Pretraining step: epoch {epoch}", write_files, logfile)
-        train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers,
-                                  pin_memory=True)
+        train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
         train_embeddings = torch.zeros((len(trainset), specs.embedding_size), dtype=torch.float)
         ae_losses = []
         autoencoder.train()
@@ -180,7 +177,7 @@ for run in range(n_runs):
             train_batch = train_batch.to(device)
 
             # Train one mini-batch
-            optimizer.zero_grad(set_to_none=True)
+            optimizer.zero_grad()
             train_embedding_, reconstruction = autoencoder.forward(train_batch)
             train_ae_loss_ = autoencoder_loss(train_batch, reconstruction)
             train_ae_loss_.backward()
@@ -192,7 +189,7 @@ for run in range(n_runs):
 
         del train_embedding_, reconstruction, train_ae_loss_, train_batch
 
-        test_loader = DataLoader(testset, batch_size=test_size, shuffle=True, num_workers=num_workers, pin_memory=True)
+        test_loader = DataLoader(testset, batch_size=test_size, shuffle=True)
         test_embeddings = torch.zeros((len(testset), specs.embedding_size), dtype=torch.float)
         test_ae_losses = []
         autoencoder.eval()
@@ -219,54 +216,53 @@ for run in range(n_runs):
         log("", write_files, logfile)
 
     # Visualize auto encoder input and respective output
-    img_shape = [specs.img_height, specs.img_width]
-    now = datetime.now()
-    time_format = "%Y_%m_%dT%H_%M"
-    index = np.random.choice(len(testset), size=1)
-    rand_input = testset[index][1].to(device)
-    reconstruction = autoencoder.forward(rand_input)[1].cpu().detach().numpy()
-    rand_input = rand_input.cpu().detach().numpy()
-    input_img = reconstruct_image(rand_input, img_shape).convert("L")
-    output_img = reconstruct_image(reconstruction, img_shape, transform=True).convert("L")
-    fig, (ax1, ax2) = plt.subplots(1, 2)
-    ax1.imshow(input_img)
-    ax1.set_title("input")
-    ax2.imshow(output_img)
-    ax2.set_title("reconstruction")
     if write_files:
+        img_shape = [specs.img_height, specs.img_width]
+        now = datetime.now()
+        time_format = "%Y_%m_%dT%H_%M"
+        index = np.random.choice(len(testset), size=1)
+        rand_input = testset[index][1].to(device)
+        with torch.no_grad():
+            reconstruction = autoencoder.forward(rand_input)[1].cpu().detach().numpy()
+        rand_input = rand_input.cpu().detach().numpy()
+        input_img = reconstruct_image(rand_input, img_shape).convert("L")
+        output_img = reconstruct_image(reconstruction, img_shape, transform=True).convert("L")
+        fig, (ax1, ax2) = plt.subplots(1, 2)
+        ax1.imshow(input_img)
+        ax1.set_title("input")
+        ax2.imshow(output_img)
+        ax2.set_title("reconstruction")
         fig.savefig(directory / f"input_e{n_pretrain_epochs}_bs{batch_size}_{now.strftime(time_format)}.jpg")
 
     # Visualize embedding space using t-SNE
-    centers = torch.from_numpy(kmeans_model.cluster_centers_)
-    test_embeds_and_centers = torch.cat((test_embeddings, centers))
-    fitted = TSNE(n_components=2, learning_rate='auto', init='random').fit_transform(test_embeds_and_centers)
-    mapped_embeds, mapped_centers = fitted[:len(testset), :], fitted[len(testset):, :]
-    colors = [*TABLEAU_COLORS.values()]
-    color_map = {i: colors[i] for i in range(specs.embedding_size)}
-    color_labels = [color_map[t.item()] for t in testset.target]
-    fig2, ax3 = plt.subplots()
-    for i in range(len(testset)):
-        ax3.plot(mapped_embeds[i, 0], mapped_embeds[i, 1], ".", color=color_labels[i])
-    for j in range(len(mapped_centers)):
-        if args.dataset == "MNIST":
-            ax3.plot(mapped_centers[j, 0], mapped_centers[j, 1], "o", color=color_map[j], label=f"{j}")
-        else:
-            ax3.plot(
-                mapped_centers[j, 0], mapped_centers[j, 1], "o", color=color_map[j]
-                , label=f"{INVERSE_DISEASE_MAPPING[j]}")
-    ax3.legend(loc="upper right")
     if write_files:
+        centers = torch.from_numpy(kmeans_model.cluster_centers_)
+        test_embeds_and_centers = torch.cat((test_embeddings, centers))
+        fitted = TSNE(n_components=2, learning_rate='auto', init='random').fit_transform(test_embeds_and_centers)
+        mapped_embeds, mapped_centers = fitted[:len(testset), :], fitted[len(testset):, :]
+        colors = [*TABLEAU_COLORS.values()]
+        color_map = {i: colors[i] for i in range(specs.embedding_size)}
+        color_labels = [color_map[t.item()] for t in testset.target]
+        fig2, ax3 = plt.subplots()
+        for i in range(len(testset)):
+            ax3.plot(mapped_embeds[i, 0], mapped_embeds[i, 1], ".", color=color_labels[i])
+        for j in range(len(mapped_centers)):
+            if args.dataset == "MNIST":
+                ax3.plot(mapped_centers[j, 0], mapped_centers[j, 1], "o", color=color_map[j], label=f"{j}")
+            else:
+                ax3.plot(
+                    mapped_centers[j, 0], mapped_centers[j, 1], "o", color=color_map[j]
+                    , label=f"{INVERSE_DISEASE_MAPPING[j]}")
+        ax3.legend(loc="upper right")
         fig2.savefig(directory / f"torch_centers{now.strftime(time_format)}.jpg")
 
     # Train the full DKM model
     cluster_centers = torch.from_numpy(kmeans_model.cluster_centers_).to(device)
-    cluster_centers.requires_grad = True
     deepkmeans = DeepKMeans(autoencoder, cluster_centers)
     optimizer = torch.optim.Adam(deepkmeans.parameters(), 0.001)
     for epoch in range(n_finetuning_epochs):
-        train_distances = torch.zeros((specs.n_clusters, len(trainset)))
-        train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers,
-                                  pin_memory=True)
+        train_distances = torch.zeros((len(trainset), specs.embedding_size))
+        train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
         train_kmeans_losses, train_ae_losses = [], []
 
         deepkmeans.train()
@@ -275,10 +271,14 @@ for run in range(n_runs):
             train_batch = train_batch.to(device)
 
             # Train one mini-batch
-            optimizer.zero_grad(set_to_none=True)
+            optimizer.zero_grad()
             train_kmeans_distance_, stack_dist, train_reconstruction = deepkmeans.forward(train_batch)
+            # print(f"train_kmeans_distance shape: {train_kmeans_distance_.shape}")
+            # print(f"train_kmeans_distance: {train_kmeans_distance_}")
+            # print(f"sum kmeans: {train_kmeans_distance_.sum(dim=1)}")
+            # exit()
             train_ae_loss_ = autoencoder_loss(train_batch, train_reconstruction)
-            train_kmeans_loss_ = train_kmeans_distance_.sum(dim=0).mean()
+            train_kmeans_loss_ = train_kmeans_distance_.sum(dim=1).mean()
             total_train_loss_ = train_ae_loss_ + lambda_ * train_kmeans_loss_
             total_train_loss_.backward()
             optimizer.step()
@@ -286,20 +286,20 @@ for run in range(n_runs):
             # Save metrics do cpu memory
             train_kmeans_losses.append(train_kmeans_loss_.item())
             train_ae_losses.append(train_ae_loss_.item())
-            train_distances[:, train_indices] = stack_dist.detach().cpu().float()
+            train_distances[train_indices, :] = stack_dist.detach().cpu().float()
 
         del train_batch, train_kmeans_distance_, stack_dist, train_reconstruction, train_ae_loss_, \
             train_kmeans_loss_, total_train_loss_
 
-        train_cluster_labels = infer_cluster_label(train_distances, len(trainset)).cpu().long()
+        train_cluster_labels = infer_cluster_label(train_distances)
         print_cluster_metrics(trainset.target, train_cluster_labels, "Train", write_files, logfile)
         train_ae, train_kmeans = sum(train_ae_losses) / n_batches, sum(train_kmeans_losses) / n_batches
-        log(f"Train loss: {train_ae + train_kmeans}", write_files, logfile)
+        log(f"Train loss: {train_ae + lambda_ * train_kmeans}", write_files, logfile)
         log(f"Train auto encoder loss: {train_ae}", write_files, logfile)
         log(f"Train kmeans loss: {train_kmeans}", write_files, logfile)
 
-        test_distances = torch.zeros((specs.n_clusters, len(testset)))
-        test_loader = DataLoader(testset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
+        test_distances = torch.zeros((len(testset), specs.embedding_size))
+        test_loader = DataLoader(testset, batch_size=batch_size, shuffle=True)
         test_kmeans_losses, test_ae_losses = [], []
         deepkmeans.eval()
         with torch.no_grad():
@@ -309,21 +309,21 @@ for run in range(n_runs):
                 # Eval one mini-batch
                 test_kmeans_distance, test_stack_dist, test_reconstruction = deepkmeans.forward(test_batch)
                 test_ae_loss = autoencoder_loss(test_batch, test_reconstruction).item()
-                test_kmeans_loss = test_kmeans_distance.sum(dim=0).mean().item()
-                total_test_loss = test_ae_loss + test_kmeans_loss
+                test_kmeans_loss = test_kmeans_distance.sum(dim=1).mean().item()
+                total_test_loss = test_ae_loss + lambda_ * test_kmeans_loss
 
                 # Save metrics to cpu memory
                 test_ae_losses.append(test_ae_loss)
                 test_kmeans_losses.append(test_kmeans_loss)
-                test_distances[:, test_indices] = test_stack_dist.detach().cpu().float()
+                test_distances[test_indices, :] = test_stack_dist.detach().cpu().float()
 
             del test_batch, test_kmeans_distance, test_stack_dist, test_reconstruction, test_ae_loss, \
                 test_kmeans_loss, total_test_loss
 
-        test_cluster_labels = infer_cluster_label(test_distances, len(testset)).cpu().long()
+        test_cluster_labels = infer_cluster_label(test_distances)
         print_cluster_metrics(testset.target, test_cluster_labels, "Test", write_files, logfile)
         test_ae, test_kmeans = sum(test_ae_losses) / n_test_batches, sum(test_kmeans_losses) / n_test_batches
-        log(f"Test loss: {test_ae + test_kmeans}", write_files, logfile)
+        log(f"Test loss: {test_ae + lambda_ * test_kmeans}", write_files, logfile)
         log(f"Test auto encoder loss: {test_ae}", write_files, logfile)
         log(f"Test kmeans loss: {test_kmeans}", write_files, logfile)
         log("", write_files, logfile)
