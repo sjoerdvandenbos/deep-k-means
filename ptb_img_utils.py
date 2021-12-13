@@ -3,26 +3,13 @@ from PIL import Image
 import numpy as np
 import skimage.measure
 from matplotlib import cm
-from torch.utils.data import Dataset
 
 from glob import glob
 from re import compile
 from pathlib import Path
 
-from utils import read_list
-
 # Pattern: any substring of characters only between a leading '_' and trailing '.'
-
 DISEASE_REGEX = compile(r"_[a-zA-z]*\.")
-DISEASE_MAPPING = {
-    "BundleBranchBlock": 0,
-    "Cardiomyopathy": 1,
-    "Dysrhythmia": 2,
-    "HealthyControl": 3,
-    "MyocardialInfarction": 4,
-    "Myocarditis": 5,
-    "ValvularHeartDisease": 6
-}
 
 
 def next_batch(num: int, data: np.ndarray) -> (np.ndarray, np.ndarray):
@@ -87,40 +74,6 @@ def reconstruct_image(pixel_vector: np.ndarray, shape, transform=False):
         return Image.fromarray(np.uint8(cm.gray(transformed) * 255))
     else:
         return Image.fromarray(np.uint8(cm.gray(numpy_right_shape) * 255))
-
-
-class PTBImgSet(Dataset):
-
-    def __init__(self, source: np.ndarray, target: np.ndarray):
-        self.data = torch.as_tensor(source)
-        self.target = torch.as_tensor(target)
-
-    def __getitem__(self, index):
-        transformed = (self.data[index] / 255).float()
-        return index, transformed, self.target[index]
-
-    def __len__(self):
-        return self.data.shape[0]
-
-
-def get_train_and_test_sets(path: Path):
-    all_data = np.load(path / "compacted_data.npy")
-    train_indices = read_list(path / "train")
-    test_indices = read_list(path / "validation")
-    train_data = all_data[train_indices]
-    test_data = all_data[test_indices]
-    all_targets = np.load(path / "compacted_target.npy")
-    train_target = np.fromiter((DISEASE_MAPPING[d] for d in all_targets[train_indices]),
-                               dtype=np.uint8)
-    test_target = np.fromiter((DISEASE_MAPPING[d] for d in all_targets[test_indices]),
-                              dtype=np.uint8)
-    train_set = PTBImgSet(train_data, train_target)
-    test_set = PTBImgSet(test_data, test_target)
-    return train_set, test_set
-
-
-def autoencoder_loss(x, y):
-    return torch.square(x - y).sum(dim=0).mean()
 
 
 if __name__ == "__main__":

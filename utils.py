@@ -6,10 +6,23 @@ __license__ = "GPL"
 import numpy as np
 import os
 from scipy.optimize import linear_sum_assignment as linear_assignment
-import tensorflow as tf
+import matplotlib.pyplot as plt
 import torch
+from torch.utils.data import Dataset
 
-TF_FLOAT_TYPE = tf.float32
+
+class ImgSet(Dataset):
+
+    def __init__(self, source: np.ndarray, target: np.ndarray):
+        self.data = torch.as_tensor(source)
+        self.target = torch.as_tensor(target)
+
+    def __getitem__(self, index):
+        transformed = (self.data[index] / 255).float()
+        return index, transformed, self.target[index]
+
+    def __len__(self):
+        return self.data.shape[0]
 
 
 def cluster_acc(y_true, y_pred):
@@ -37,6 +50,35 @@ def map_clusterlabels_to_groundtruth(gtruth, cluster_label):
     ind = linear_assignment(w.max() - w) # Optimal label mapping based on the Hungarian algorithm
     truth_map = dict(zip(ind[0], ind[1]))
     return np.array([truth_map[e.item()] for e in cluster_label])
+
+
+def conv_regularization_loss(autoencoder):
+    conv_layers = _get_conv_layers(autoencoder)
+    loss = 0
+    for conv in conv_layers:
+        loss += _conv_regularization(conv.weight, conv.stride)
+    return loss
+
+
+def _get_conv_layers(autoencoder):
+    all_modules = [*autoencoder.encoder, *autoencoder.decoder]
+    only_convs = [
+        m for m in all_modules
+        if type(m) == torch.nn.Conv2d
+        or type(m) == torch.nn.ConvTranspose2d
+    ]
+    return only_convs
+
+
+def _conv_regularization(kernel, stride=2, padding=1):
+    """ Copied from https://github.com/samaonline/Orthogonal-Convolutional-Neural-Networks/blob
+    /aa7f56901c661a124e0cfe72eb2c9dc98045ce94/imagenet/utils.py#L34"""
+    out_channels = kernel.shape[0]
+    self_conv = torch.conv2d(kernel, kernel, stride=stride, padding=padding)
+    target = torch.zeros((out_channels, out_channels, self_conv.shape[-2], self_conv.shape[-1])).cuda()
+    ct = int(np.floor(self_conv.shape[-1]/2))
+    target[:, :, ct, ct] = torch.eye(out_channels).cuda()
+    return torch.norm(self_conv - target)
 
 
 def next_batch(num, data):
@@ -82,3 +124,9 @@ def write_list(file_name, array):
     with open(file_name, 'w') as f:
         for item in array:
           f.write("{}\n".format(item))
+
+
+def get_color_map(n_colors):
+    cm = plt.get_cmap('gist_rainbow')
+    colors = [cm(i/n_colors) for i in range(n_colors)]
+    return dict(enumerate(colors))
