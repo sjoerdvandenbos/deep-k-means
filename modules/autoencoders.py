@@ -1,3 +1,4 @@
+import torch
 from torch import nn
 
 from modules.layers import OrthogonalLinearLayer, ReshapeLayer, InterpolateLayer, OrthogonalConv2d
@@ -5,45 +6,84 @@ from modules.utils import get_post_conv_height_and_width, get_output_padding
 from modules.blocks import BottleneckConvBlock, BottleneckConvTransposeBlock, BasicConvBlock, BasicConvTransposeBlock
 
 
-def get_autoencoder(name: str, height, width, embedding_size, n_channels) -> nn.Module:
-    if name == "CONVOAUTOENCODER":
+def get_autoencoder(name, height, width, embedding_size, n_channels, n_layers=1, decoder_input_type="EMPTY") -> nn.Module:
+    if name == "CONVO_AUTOENCODER":
         return ConvAutoencoder(height, width, embedding_size, n_channels)
-    elif name == "FCAUTOENCODER":
+    elif name == "FC_AUTOENCODER":
         return StackedAutoencoder(height, width, embedding_size, n_channels)
-    elif name == "OLMAUTOENCODER":
+    elif name == "OLM_AUTOENCODER":
         return OrthogonalSAE(height, width, embedding_size, n_channels)
-    elif name == "RESNETCONVOAUTOENCODER" or name == "RESNETCONVOAUTOENCODER50":
+    elif name == "RESNET_AUTOENCODER" or name == "RESNET_AUTOENCODER_50":
         return ResnetConvoAutoencoder(height, width, embedding_size, n_channels, BottleneckConvBlock,
                                       BottleneckConvTransposeBlock, (3, 4, 6, 3))
-    elif name == "RESNETCONVOAUTOENCODER18":
+    elif name == "RESNET_AUTOENCODER_18":
         return ResnetConvoAutoencoder(height, width, embedding_size, n_channels, BasicConvBlock,
                                       BasicConvTransposeBlock, (2, 2, 2, 2))
-    elif name == "RESNETCONVOAUTOENCODER34":
+    elif name == "RESNET_AUTOENCODER_34":
         return ResnetConvoAutoencoder(height, width, embedding_size, n_channels, BasicConvBlock,
                                       BasicConvTransposeBlock, (3, 4, 6, 3))
-    elif name == "RESNETCONVOAUTOENCODER10":
+    elif name == "RESNET_AUTOENCODER_10":
         return ResnetConvoAutoencoder(height, width, embedding_size, n_channels, BasicConvBlock,
                                       BasicConvTransposeBlock, (1, 1, 1, 1))
-    elif name == "LSTM":
-        return LSTMAutoencoder(height, embedding_size)
     else:
         print("Autoencoder not found!")
         exit()
 
 
-class LSTMAutoencoder(nn.Module):
-    def __init__(self, height, embedding_size):
-        super().__init__()
-        self.encoder = nn.LSTM(height, embedding_size, batch_first=True)
-        self.decoder = nn.LSTM(embedding_size, height, batch_first=True)
+def get_lstm_autoencoder(name, encoder, decoder, embedding_size):
+    if name == "STACKED_LSTM_AUTOENCODER":
+        return StackedLSTMAutoencoder(encoder, decoder, embedding_size)
+    elif name == "LSTM_AUTOENCODER":
+        return LSTMAutoencoder(encoder, decoder, embedding_size)
+    else:
+        print("Lstm autoencoder not found!")
+        exit()
 
-    def forward(self, x):
-        batch_size, _, height, signal_length = x.shape
-        x = x.view(batch_size, height, signal_length).permute(0, 2, 1)  # Swap height and signal_length indices
-        _, (hidden, cell) = self.encoder(x)
-        embeddings = hidden.squeeze()
-        _, (hidden, cell) = self.decoder(hidden)
-        return embeddings, hidden.permute(0, 2, 1).unsqueeze(1)
+
+class LSTMAutoencoder(nn.Module):
+    def __init__(self, encoder, decoder, embedding_size):
+        super().__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+        hidden_size = encoder.hidden_size
+        n_layers = encoder.n_layers
+        forced_embedding_size = 2 * hidden_size * n_layers
+        assert embedding_size == forced_embedding_size, f"Invalid embedding size for this lstm_ae, required: " \
+                                                        f"{forced_embedding_size} your input from cli: {embedding_size}"
+
+    def forward(self, encoder_input, decoder_input):
+        batch_size = encoder_input.shape[0] if self.encoder.batch_first else encoder_input.shape[1]
+        _, (hidden, cell) = self.encoder.forward(encoder_input)
+        embed_hidden = hidden.permute(1, 2, 0).reshape(batch_size, -1)
+        embed_cell = cell.permute(1, 2, 0).reshape(batch_size, -1)
+        embeddings = torch.cat((embed_hidden, embed_cell), dim=1)
+        x, _ = self.decoder(decoder_input, (hidden, cell))
+        return embeddings, x.permute(0, 2, 1).unsqueeze(1).flip(-1)
+
+
+class StackedLSTMAutoencoder(nn.Module):
+    def __init__(self, encoder, decoder, embedding_size):
+        super().__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+        self.inner_encoder = nn.Linear(encoder.hidden_size * encoder.num_layers * 2, embedding_size)
+        self.inner_decoder = nn.Linear(embedding_size, decoder.hidden_size * decoder.num_layers * 2)
+
+    def forward(self, encoder_input, decoder_input):
+        batch_size = encoder_input.shape[0] if self.encoder.batch_first else encoder_input.shape[1]
+        _, (hidden, cell) = self.encoder.forward(encoder_input)
+        # reshape hidden and cell to input for fully connected layer
+        hidden = hidden.permute(1, 2, 0).reshape(batch_size, -1)
+        cell = cell.permute(1, 2, 0).reshape(batch_size, -1)
+        x = torch.cat((hidden, cell), dim=1)
+        embeddings = self.inner_encoder(x)                                # Shape: [batch, embedding_size]
+        x = self.inner_decoder(embeddings)
+        # reshape to hidden and cell of the lstm decoder, the first dimension of x indexes the hidden/cell state
+        x = x.view(batch_size, 2, self.encoder.num_layers, self.encoder.input_size).permute(1, 2, 0, 3)
+        hidden = x[0, :, :, :].contiguous()
+        cell = x[1, :, :, :].contiguous()
+        x, _ = self.decoder(decoder_input, (hidden, cell))
+        return embeddings, x.permute(0, 2, 1).unsqueeze(1)
 
 
 class StackedAutoencoder(nn.Module):

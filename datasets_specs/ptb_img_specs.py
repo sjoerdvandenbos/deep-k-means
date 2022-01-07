@@ -4,7 +4,7 @@ from pathlib import Path
 from utils import read_list, ImgSet
 
 
-data_path = Path.cwd() / "split" / "ptb-concatted-leads" / "3k_per_disease_3_diseases"
+data_path = Path.cwd() / "split" / "ptb-12lead-plot" / "all_samples_2_diseases"
 print("Loading PTB image set...")
 data = np.load(data_path / "compacted_data.npy").astype(np.uint8)
 diseases = np.load(data_path / "compacted_target.npy").astype(np.str).flatten()
@@ -12,8 +12,6 @@ inverse_disease_mapping = dict(enumerate(np.unique(diseases)))
 disease_mapping = {v: k for k, v in inverse_disease_mapping.items()}
 target = np.fromiter((disease_mapping[d] for d in diseases), dtype=np.int32)
 print("Done loading data")
-
-data = data.reshape((9600, 1, 314, 384))
 
 n_samples = target.shape[0]
 print(f"data shape: {data.shape}")

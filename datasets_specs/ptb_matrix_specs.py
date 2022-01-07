@@ -6,7 +6,7 @@ from utils import read_list, ImgSet
 from ptb_matrix_utils import get_matrix_data_from_npy
 
 
-dataset_path = Path.cwd() / "split" / "ptb-matrices" / "all_samples_3_diseases"
+dataset_path = Path.cwd() / "split" / "ptb-12lead-matrices-100hz" / "all_samples_2_diseases"
 data, diseases = get_matrix_data_from_npy(dataset_path)
 print(data.shape)
 print(diseases.shape)

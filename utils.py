@@ -42,14 +42,18 @@ def cluster_acc(y_true, y_pred):
 
 
 def map_clusterlabels_to_groundtruth(gtruth, cluster_label):
+    truth_map = get_clusterlabel_to_groundtruth_map(gtruth, cluster_label)
+    return np.array([truth_map[e.item()] for e in cluster_label])
+
+
+def get_clusterlabel_to_groundtruth_map(gtruth, cluster_label):
     """ Returns a map clabel -> gtruth. """
     D = max(cluster_label.max().item(), gtruth.max().item()) + 1
     w = torch.zeros((D, D), dtype=torch.long)
     for i in range(cluster_label.size(0)):
         w[cluster_label[i], gtruth[i]] += 1
     ind = linear_assignment(w.max() - w) # Optimal label mapping based on the Hungarian algorithm
-    truth_map = dict(zip(ind[0], ind[1]))
-    return np.array([truth_map[e.item()] for e in cluster_label])
+    return dict(zip(ind[0], ind[1]))
 
 
 def conv_regularization_loss(autoencoder):
@@ -105,6 +109,27 @@ def shuffle(data, target):
     return shuffled_data, shuffled_labels, indices
 
 
+def load_dataset(path):
+    print("loading dataset...")
+    data = np.load(path / "compacted_data.npy")
+    target = np.load(path / "compacted_target.npy")
+    train_indices = read_list(path / "train")
+    validation_indices = read_list(path / "validation")
+    print("done loading")
+    return data, target, train_indices, validation_indices
+
+
+def write_dataset(path, name, data, target, train_indices, validation_indices):
+    print("writing dataset...")
+    new_dir = path / name
+    new_dir.mkdir()
+    np.save(new_dir / "compacted_data.npy", data)
+    np.save(new_dir / "compacted_target.npy", target)
+    write_list(new_dir / "train", train_indices)
+    write_list(new_dir / "validation", validation_indices)
+    print("done writing")
+
+
 def read_list(file_name, type='int'):
     with open(file_name, 'r') as f:
         lines = f.readlines()
@@ -126,7 +151,14 @@ def write_list(file_name, array):
           f.write("{}\n".format(item))
 
 
-def get_color_map(n_colors):
+def get_color_map(n_colors, is_darker=False):
     cm = plt.get_cmap('gist_rainbow')
     colors = [cm(i/n_colors) for i in range(n_colors)]
+    if is_darker:
+        colors = [_darken_rgba(c) for c in colors]
     return dict(enumerate(colors))
+
+
+def _darken_rgba(rgba_tuple, factor=1.5):
+    r, g, b, a = rgba_tuple
+    return r/factor, g/factor, b/factor, a

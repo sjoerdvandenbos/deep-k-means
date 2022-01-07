@@ -16,8 +16,6 @@ class Learner:
         self.seeded = args.seeded                                        # Specify if runs are seeded
         self.n_runs = args.number_runs
         self.is_writing_to_disc = args.write_files
-        self.autoencoder_name = args.autoencoder
-        self.ae_loss_name = args.loss
         self.dataset_name = args.dataset
         # Parameter setting from dataset specs
         self.n_channels = specs.n_channels
@@ -32,9 +30,8 @@ class Learner:
         self.seeds = [8905, 9129, 291, 4012, 1256, 6819, 4678, 6971, 1362, 575]
         self.start_time = datetime.now()
         self.kmeans_model = None
-        self.autoencoder = None
-        self.embedding_size = self.n_clusters
-        self.lr = 0.001
+        self.embedding_size = 2
+        self.lr = args.lr
         self.run = 0
         # Hardware specifications
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -65,4 +62,4 @@ class Learner:
 
         self._log(f"Hyperparameters: lambda={self.lambda_}, pretrain_epochs={self.n_pretrain_epochs}, "
                   f"finetune_epochs={self.n_finetuning_epochs}, batch_size={self.batch_size}, "
-                  f"autoencoder={self.autoencoder_name}, loss={self.ae_loss_name}, lambda={self.lambda_}")
+                  f"initial_lr={self.lr}, n_runs={self.n_runs}, embedding_size={self.embedding_size}")
