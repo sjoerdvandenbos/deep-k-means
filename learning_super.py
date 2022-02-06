@@ -18,6 +18,7 @@ class Learner:
         self.is_writing_to_disc = args.write_files
         self.dataset_name = args.dataset
         # Parameter setting from dataset specs
+        self.dataset_path = specs.dataset_path
         self.n_channels = specs.n_channels
         self.n_clusters = specs.n_clusters
         self.trainset, self.testset = specs.trainset, specs.testset
@@ -30,7 +31,7 @@ class Learner:
         self.seeds = [8905, 9129, 291, 4012, 1256, 6819, 4678, 6971, 1362, 575]
         self.start_time = datetime.now()
         self.kmeans_model = None
-        self.embedding_size = 2
+        self.embedding_size = args.embedding_size
         self.lr = args.lr
         self.run = 0
         # Hardware specifications
@@ -62,4 +63,5 @@ class Learner:
 
         self._log(f"Hyperparameters: lambda={self.lambda_}, pretrain_epochs={self.n_pretrain_epochs}, "
                   f"finetune_epochs={self.n_finetuning_epochs}, batch_size={self.batch_size}, "
-                  f"initial_lr={self.lr}, n_runs={self.n_runs}, embedding_size={self.embedding_size}")
+                  f"initial_lr={self.lr}, n_runs={self.n_runs}, embedding_size={self.embedding_size}, "
+                  f"dataset_path={self.dataset_path}")

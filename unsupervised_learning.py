@@ -13,13 +13,13 @@ from sklearn.metrics.cluster import adjusted_rand_score
 from sklearn.metrics.cluster import normalized_mutual_info_score
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 from torch.utils.data import DataLoader
 
+from log_metrics import write_visuals_and_summary
 from utils import cluster_acc, map_clusterlabels_to_groundtruth, get_color_map, get_clusterlabel_to_groundtruth_map
 from ptb_img_utils import reconstruct_image
 from modules.misc import DeepKMeans, PolarMapper
-from modules.autoencoders import get_autoencoder
-from modules.autoencoder_setups import get_ae_setup
 from learning_super import Learner
 
 
@@ -32,88 +32,63 @@ class UnsupervisedLearner(Learner):
         self._log(f"polar_mapping_enabled={self.polar_mapping_enabled}")
         self._log(f"autoencder setup:\n{autoencoder_setup}")
         self.deep_cluster_net = None
+        self.optimizer = None
 
     def run_repeated_learning(self):
         for _ in range(self.n_runs):
             self._log(f"Run {self.run}")
             self.autoencoder_setup.set_new_autoencoder()
+            self.optimizer = torch.optim.Adam(self.autoencoder_setup.parameters(), self.lr)
             if self.is_writing_to_disc and self.run == 0:
+                print(self.autoencoder_setup.autoencoder)
                 self.save_architecture()
             if self.seeded:
                 torch.manual_seed(self.seeds[self.run])
                 np.random.seed(self.seeds[self.run])
             self.pretrain()
-            self.finetune()
+            if self.n_finetuning_epochs > 0:
+                self.finetune()
             self.run += 1
         duration = datetime.now() - self.start_time
         self._log(f"Learning duration: {duration}")
+        write_visuals_and_summary(self.directory)
 
     def pretrain(self):
-        optimizer = torch.optim.Adam(self.autoencoder_setup.parameters(), self.lr)
-        train_polarmapper = PolarMapper()
-        test_polarmapper = PolarMapper()
-        test_embeds = torch.zeros((len(self.testset), self.embedding_size), dtype=torch.float)
-        train_embeds = torch.zeros((len(self.trainset), self.embedding_size), dtype=torch.float)
-
         for epoch in range(self.n_pretrain_epochs):
             self._log(f"Pretraining step: epoch {epoch}")
             train_loader = DataLoader(self.trainset, batch_size=self.batch_size, shuffle=True, pin_memory=True)
-            train_polar_embeds = torch.zeros_like(train_embeds)
-            if self.polar_mapping_enabled and epoch > 0:
-                train_polarmapper.set_center(train_embeds.to(self.device))
+            train_polarmapper = PolarMapper(self.embedding_size, self.device)
+            train_embeds = torch.zeros((len(self.trainset), self.embedding_size), dtype=torch.float, device=self.device)
+            train_polar_embeds = torch.zeros_like(train_embeds, dtype=torch.float, device=self.device)
             ae_losses = []
             self.autoencoder_setup.train()
             for train_indices, train_batch, _ in train_loader:
                 train_batch = train_batch.to(self.device)
-
-                # Train one mini-batch
-                self.autoencoder_setup.zero_grad(set_to_none=True)
-                train_embed_, reconstruction = self.autoencoder_setup.forward(train_batch)
-                if self.polar_mapping_enabled:
-                    train_polar_embed_ = train_polarmapper(train_embed_)
-                train_ae_loss_ = self.autoencoder_setup.get_autoencoder_loss(reconstruction, train_batch)
-                train_ae_loss_.backward()
-                torch.nn.utils.clip_grad_value_(self.autoencoder_setup.parameters(), 10.0)
-                optimizer.step()
-
-                # Save metrics to cpu memory
-                ae_losses.append(train_ae_loss_.item())
-                train_embeds[train_indices, :] = train_embed_.detach().cpu()
-                if self.polar_mapping_enabled:
-                    train_polar_embeds[train_indices, :] = train_polar_embed_.detach().cpu()
-
-            del train_embed_, reconstruction, train_ae_loss_, train_batch
+                self.pretrain_minibatch(train_indices, train_batch, train_embeds, ae_losses, train_polar_embeds,
+                                        train_polarmapper)
 
             test_loader = DataLoader(self.testset, batch_size=self.test_size, shuffle=True, pin_memory=True)
-            test_polar_embeddings = torch.zeros_like(test_embeds)
+            test_polarmapper = PolarMapper(self.embedding_size, self.device)
+            test_embeds = torch.zeros((len(self.testset), self.embedding_size), dtype=torch.float, device=self.device)
+            test_polar_embeds = torch.zeros_like(test_embeds, device=self.device)
             test_ae_losses = []
             self.autoencoder_setup.eval()
             with torch.no_grad():
-                if self.polar_mapping_enabled and epoch > 0:
-                    test_polarmapper.set_center(test_embeds.to(self.device))
                 for test_indices, test_batch, _ in test_loader:
                     test_batch = test_batch.to(self.device)
-
-                    # Eval one mini-batch
-                    test_embedding_, test_reconstruction = self.autoencoder_setup.forward(test_batch)
-                    if self.polar_mapping_enabled:
-                        test_polar_embedding_ = test_polarmapper(test_embedding_)
-                    test_ae_loss_ = self.autoencoder_setup.get_autoencoder_loss(test_reconstruction, test_batch)
-
-                    # Save metrics to cpu memory
-                    test_ae_losses.append(test_ae_loss_.item())
-                    test_embeds[test_indices, :] = test_embedding_.detach().cpu()
-                    if self.polar_mapping_enabled:
-                        test_polar_embeddings[test_indices, :] = test_polar_embedding_.detach().cpu()
+                    self.pretrain_minibatch(test_indices, test_batch, test_embeds, test_ae_losses,
+                                            test_polar_embeds, test_polarmapper)
 
             if self.polar_mapping_enabled:
-                self.kmeans_model = KMeans(n_clusters=self.n_clusters).fit(train_polar_embeds)
+                self.kmeans_model = KMeans(n_clusters=self.n_clusters, tol=1e-6)
+                self.kmeans_model.fit(train_polar_embeds.detach().double().cpu().numpy())
                 train_cluster_labels = torch.from_numpy(self.kmeans_model.labels_).long()
-                test_cluster_labels = torch.from_numpy(self.kmeans_model.predict(test_polar_embeddings))
+                test_cluster_labels = torch.from_numpy(self.kmeans_model.predict(test_polar_embeds.detach().double().cpu()))
             else:
-                self.kmeans_model = KMeans(n_clusters=self.n_clusters).fit(train_embeds)
+                self.kmeans_model = KMeans(n_clusters=self.n_clusters, tol=1e-6)
+                self.kmeans_model.fit(train_embeds.detach().double().cpu().numpy())
                 train_cluster_labels = torch.from_numpy(self.kmeans_model.labels_).long()
-                test_cluster_labels = torch.from_numpy(self.kmeans_model.predict(test_embeds))
+                test_cluster_labels = torch.from_numpy(self.kmeans_model.predict(test_embeds.detach().double().cpu()))
 
             self._log(f"Train auto encoder loss: {sum(ae_losses) / self.n_batches}")
             self._print_cluster_metrics(self.trainset.target, train_cluster_labels, "Train")
@@ -122,15 +97,29 @@ class UnsupervisedLearner(Learner):
             self._log("")
 
         if self.is_writing_to_disc:
-            if self.dataset_name == "PTB" or self.dataset_name == "MNIST":
-                self._visualize_autoencoder_image()
-            elif self.dataset_name == "PTBMAT":
-                self._visualize_autoencoder_matrix()
+            np.save(self.directory / "test_embeds.npy", test_embeds.cpu().numpy())
+            np.save(self.directory / "test_polar_embeds.npy", test_polar_embeds.cpu().numpy())
+            self.draw_visualizations(
+                "pretrain",
+                test_embeds.detach().cpu().double(),
+                test_polar_embeds.detach().cpu().double(),
+                test_cluster_labels.detach().cpu().double()
+            )
+
+    def pretrain_minibatch(self, indices, batch, embeds, ae_losses, mapped_embeds, mapper):
+        self.autoencoder_setup.zero_grad(set_to_none=True)
+        embed_, reconstruction = self.autoencoder_setup.forward(batch)
+        embeds[indices, :] = embed_.detach()
+        with torch.no_grad():
             if self.polar_mapping_enabled:
-                self._cluster_plot(test_embeds, test_cluster_labels, "pretrain", show_centers=False)
-                self._cluster_plot(test_polar_embeddings, test_cluster_labels, "pretrain_polar")
-            else:
-                self._cluster_plot(test_embeds, test_cluster_labels, "pretrain")
+                mapper.update(embeds)
+                mapped_embeds[indices, :] = mapper(embed_).detach()
+        train_ae_loss_ = self.autoencoder_setup.get_autoencoder_loss(reconstruction, batch)
+        if self.autoencoder_setup.training:
+            train_ae_loss_.backward()
+            torch.nn.utils.clip_grad_value_(self.autoencoder_setup.parameters(), 10.0)
+            self.optimizer.step()
+        ae_losses.append(train_ae_loss_.item())
 
     def finetune(self):
         # Train the full DKM model
@@ -142,14 +131,14 @@ class UnsupervisedLearner(Learner):
         train_polar_embeds = torch.zeros_like(train_embeds)
         test_polar_embeds = torch.zeros_like(test_embeds)
         if self.polar_mapping_enabled:
-            train_polarmapper = PolarMapper()
-            test_polarmapper = PolarMapper()
+            train_polarmapper = PolarMapper(self.embedding_size, self.device)
+            test_polarmapper = PolarMapper(self.embedding_size, self.device)
         else:
             train_polarmapper = None
             test_polarmapper = None
         for epoch in range(self.n_finetuning_epochs):
-            if self.polar_mapping_enabled and epoch > 0:
-                train_polarmapper.set_center(train_embeds.to(self.device))
+            # if self.polar_mapping_enabled and epoch > 0:
+            #     train_polarmapper.set_center(train_embeds.to(self.device))
             train_distances = torch.zeros((len(self.trainset), self.n_clusters))
             train_loader = DataLoader(self.trainset, batch_size=self.batch_size, shuffle=True, pin_memory=True)
             train_cluster_losses, train_ae_losses = [], []
@@ -213,36 +202,27 @@ class UnsupervisedLearner(Learner):
             self._print_finetune_metrics(test_distances, test_ae_losses, test_cluster_losses, "Test")
             self._log("")
 
-        # Visualize embedding space
         if self.is_writing_to_disc:
             test_cluster_labels = self.infer_cluster_label(test_distances)
-            if self.polar_mapping_enabled:
-                self._cluster_plot(test_embeds, test_cluster_labels, "finetune", show_centers=False)
-                self._cluster_plot(test_polar_embeds, test_cluster_labels, "finetune_polar")
-            else:
-                self._cluster_plot(test_embeds, test_cluster_labels, "finetune")
+            self.draw_visualizations("finetune", test_embeds, test_polar_embeds, test_cluster_labels)
 
-    def _cluster_plot(self, test_embeds, test_cluster_labels, phase,  show_centers=True):
-        if phase == "pretrain" or "pretrain_polar":
-            cluster_centers = torch.from_numpy(self.kmeans_model.cluster_centers_)
+    def draw_visualizations(self, phase, embeds, mapped_embeds, test_cluster_labels):
+        if self.dataset_name == "PTB" or self.dataset_name == "MNIST":
+            self._visualize_autoencoder_image()
+        elif self.dataset_name == "PTBMAT":
+            self._visualize_autoencoder_matrix()
+        if self.polar_mapping_enabled:
+            self._cluster_plot_diseases(embeds, test_cluster_labels, phase, show_centers=False)
+            self._cluster_plot_diseases(mapped_embeds, test_cluster_labels, f"{phase}_polar")
         else:
-            cluster_centers = self.deep_cluster_net.cluster_reps.detach().cpu().float()
-        centers_and_embeds = torch.cat((test_embeds, cluster_centers))
-        if test_embeds.shape[1] > 2:
-            mapped_embeds_and_centers = PCA(n_components=2).fit_transform(centers_and_embeds)
-        elif test_embeds.shape[1] == 2:
-            mapped_embeds_and_centers = centers_and_embeds.clone()
-        else:
-            zeros = torch.zeros_like(centers_and_embeds)
-            mapped_embeds_and_centers = torch.cat((centers_and_embeds, zeros), dim=1)
+            self._cluster_plot_diseases(embeds, test_cluster_labels, "pretrain")
+
+    def _cluster_plot_diseases(self, test_embeds, test_cluster_labels, phase, show_centers=True):
+        mapped_embeds_and_centers = self._apply_dimensionality_reduction(test_embeds, phase, show_centers)
         mapped_embeds = mapped_embeds_and_centers[:len(test_embeds)]
-        mapped_centers = mapped_embeds_and_centers[len(test_embeds):]
         label_map = get_clusterlabel_to_groundtruth_map(self.testset.target, test_cluster_labels)
-        centers_ground_truths = [label_map[i] for i in range(len(cluster_centers))]
-        color_map = get_color_map(self.n_clusters)
         darkened_color_map = get_color_map(self.n_clusters, is_darker=True)
         embeds_colors = [darkened_color_map[t.item()] for t in self.testset.target]
-        centers_colors = [color_map[gt] for gt in centers_ground_truths]
         fig, ax = plt.subplots()
         for i in range(len(self.testset)):
             if self.dataset_name == "MNIST":
@@ -252,7 +232,11 @@ class UnsupervisedLearner(Learner):
                 ax.plot(mapped_embeds[i, 0], mapped_embeds[i, 1], ".", color=embeds_colors[i],
                         label=f"{self.inverse_disease_mapping[self.testset.target[i].item()]}", alpha=0.3)
         if show_centers:
-            for i in range(len(cluster_centers)):
+            mapped_centers = mapped_embeds_and_centers[len(test_embeds):]
+            centers_ground_truths = [label_map[i] for i in range(self.n_clusters)]
+            color_map = get_color_map(self.n_clusters)
+            centers_colors = [color_map[gt] for gt in centers_ground_truths]
+            for i in range(self.n_clusters):
                 ax.plot(mapped_centers[i, 0], mapped_centers[i, 1], self._get_trimarker(i), color=centers_colors[i],
                         zorder=2)
         # Shrink current axis's height by 10% on the bottom
@@ -260,6 +244,41 @@ class UnsupervisedLearner(Learner):
         ax.set_position([box.x0, box.y0 + box.height * 0.1, box.width, box.height * 0.9])
         self._legend_without_duplicate_labels(ax, loc="upper center", bbox_to_anchor=(0.5, -0.05), fancybox=True)
         fig.savefig(self.directory / f"torch_centers_run{self.run}_{phase}.jpg")
+        fig.clear()
+
+    def _cluster_plot_others(self, embeds, targets, name):
+        mapped_embeds = self._apply_dimensionality_reduction(embeds, "custom")
+        inverse_class_mapping = dict(enumerate(targets.unique()))
+        class_mapping = {v: k for k, v in inverse_class_mapping.items()}
+        darkened_color_map = get_color_map(len(class_mapping), is_darker=True)
+        embeds_colors = [darkened_color_map[class_mapping[t]] for t in targets]
+        fig, ax = plt.subplots()
+        for i in range(embeds.shape[0]):
+            ax.plot(mapped_embeds[i, 0], mapped_embeds[i, 1], ".", color=embeds_colors[i],
+                    label=f"{targets[i]}", alpha=0.3)
+        # Shrink current axis's height by 10% on the bottom
+        box = ax.get_position()
+        ax.set_position([box.x0, box.y0 + box.height * 0.1, box.width, box.height * 0.9])
+        self._legend_without_duplicate_labels(ax, loc="upper center", bbox_to_anchor=(0.5, -0.05), fancybox=True)
+        fig.savefig(self.directory / f"torch_centers_run{self.run}_{name}.jpg")
+        fig.clear()
+
+    def _apply_dimensionality_reduction(self, embeds, phase, include_centers=True):
+        if phase == "pretrain" or "pretrain_polar":
+            cluster_centers = torch.from_numpy(self.kmeans_model.cluster_centers_)
+        else:
+            cluster_centers = self.deep_cluster_net.cluster_reps.detach().cpu().float()
+        if include_centers:
+            vecs = torch.cat((embeds, cluster_centers))
+        else:
+            vecs = embeds.clone()
+        if embeds.shape[1] > 2:
+            return PCA(n_components=2).fit_transform(vecs)
+        elif embeds.shape[1] == 2:
+            return vecs.clone()
+        else:
+            zeros = torch.zeros_like(vecs)
+            return torch.cat((vecs, zeros), dim=1)
 
     @staticmethod
     def _legend_without_duplicate_labels(ax, **kwargs):
@@ -282,7 +301,7 @@ class UnsupervisedLearner(Learner):
         index = np.random.choice(len(self.testset), size=1)
         rand_input = self.testset[index][1].to(self.device)
         with torch.no_grad():
-            reconstruction = self.autoencoder.forward(rand_input)[1].cpu().detach().numpy()
+            reconstruction = self.autoencoder_setup.forward(rand_input)[1].cpu().detach().numpy()
         rand_input = rand_input.cpu().detach().numpy()
         input_img = reconstruct_image(rand_input, img_shape).convert("L")
         output_img = reconstruct_image(reconstruction, img_shape, transform=True).convert("L")
@@ -292,29 +311,37 @@ class UnsupervisedLearner(Learner):
         ax2.imshow(output_img)
         ax2.set_title("reconstruction")
         fig.savefig(self.directory / f"input_e{self.n_pretrain_epochs}_bs{self.batch_size}_{now.strftime(time_format)}.jpg")
+        fig.clear()
 
     def _visualize_autoencoder_matrix(self):
         index = np.random.choice(len(self.testset), size=1)
         rand_input = self.testset[index][1].to(self.device)
         with torch.no_grad():
-            reconstruction = self.autoencoder.forward(rand_input)[1].cpu().detach().numpy()
+            reconstruction = self.autoencoder_setup.forward(rand_input)[1].cpu().detach().numpy()
         rand_input = rand_input.cpu().detach().numpy()
-        if self.ae_objective == "PREDICTION":
-            prediction_size = reconstruction.shape[-1]
+        if self.autoencoder_setup.objective == "PREDICTION":
+            prediction_size = reconstruction.shape[3]
             rand_input = rand_input[:, :, :, prediction_size:]
+        elif self.autoencoder_setup.objective == "RECONSTRUCTION":
+            start_indices = rand_input.shape[3] - reconstruction.shape[3]
+            reconstruction = np.flip(reconstruction, 3)
+            rand_input = rand_input[:, :, :, start_indices:]
+            x1 = torch.arange(rand_input.shape[3])
         fig, axes = plt.subplots(3, 4)
-        x = torch.arange(reconstruction.shape[-1])
+        x2 = torch.arange(reconstruction.shape[-1])
         lead_names = ['i', 'ii', 'iii', 'avr', 'avl', 'avf', 'v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'vx', 'vy', 'vz']
         for lead in range(self.img_height):
             plot_row = lead // 4
             plot_col = lead % 4
             ax = axes[plot_row, plot_col]
-            ax.plot(x, rand_input[0, 0, lead, :], color="blue")
-            ax.plot(x, reconstruction[0, 0, lead, :], color="red")
+            ax.plot(x1, rand_input[0, 0, lead, :], "-b", alpha=0.5)
+            ax.plot(x2, reconstruction[0, 0, lead, :], ":r", alpha=0.5)
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_title(f"lead {lead_names[lead]}")
-        fig.savefig(self.directory / f"matrix_{type(self.autoencoder_setup)}_{self.run}.jpg")
+            ax.set_ylim(-0.01, 0.01)
+        fig.savefig(self.directory / f"matrix{self.autoencoder_setup!r}_{self.run}.jpg")
+        fig.clear()
 
     def _print_finetune_metrics(self, distances, ae_losses, kmeans_losses, phase):
         cluster_labels = self.infer_cluster_label(distances)
@@ -346,3 +373,8 @@ class UnsupervisedLearner(Learner):
     def save_architecture(self):
         with self.directory.joinpath("autoencoder.txt").open("w+") as f:
             f.write(str(self.autoencoder_setup))
+
+    @staticmethod
+    def reduce_dimensionality_tsne(embeds):
+        numpy_embeds = embeds.detach().double().cpu().numpy()
+        return TSNE(n_components=2).fit(numpy_embeds)

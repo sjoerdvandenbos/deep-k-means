@@ -46,7 +46,7 @@ class LSTMAutoencoder(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
         hidden_size = encoder.hidden_size
-        n_layers = encoder.n_layers
+        n_layers = encoder.num_layers
         forced_embedding_size = 2 * hidden_size * n_layers
         assert embedding_size == forced_embedding_size, f"Invalid embedding size for this lstm_ae, required: " \
                                                         f"{forced_embedding_size} your input from cli: {embedding_size}"
@@ -57,7 +57,8 @@ class LSTMAutoencoder(nn.Module):
         embed_hidden = hidden.permute(1, 2, 0).reshape(batch_size, -1)
         embed_cell = cell.permute(1, 2, 0).reshape(batch_size, -1)
         embeddings = torch.cat((embed_hidden, embed_cell), dim=1)
-        x, _ = self.decoder(decoder_input, (hidden, cell))
+        prepared = _prepare_decoder_input(encoder_input, decoder_input)
+        x, _ = self.decoder(prepared, (hidden, cell))
         return embeddings, x.permute(0, 2, 1).unsqueeze(1).flip(-1)
 
 
@@ -82,8 +83,15 @@ class StackedLSTMAutoencoder(nn.Module):
         x = x.view(batch_size, 2, self.encoder.num_layers, self.encoder.input_size).permute(1, 2, 0, 3)
         hidden = x[0, :, :, :].contiguous()
         cell = x[1, :, :, :].contiguous()
-        x, _ = self.decoder(decoder_input, (hidden, cell))
+        prepared = _prepare_decoder_input(encoder_input, decoder_input)
+        x, _ = self.decoder(prepared, (hidden, cell))
         return embeddings, x.permute(0, 2, 1).unsqueeze(1)
+
+
+def _prepare_decoder_input(encoder_input, unprepared_decoder_input):
+    last_output = encoder_input[:, -1, :].unsqueeze(1)
+    to_be_used = unprepared_decoder_input[:, :-1, :]
+    return torch.cat((last_output, to_be_used), dim=1)
 
 
 class StackedAutoencoder(nn.Module):

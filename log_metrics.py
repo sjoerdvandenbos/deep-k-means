@@ -21,24 +21,27 @@ def write_visuals_and_summary(folder):
     logfile = folder / "log.txt"
     print(f"Reading from {logfile}")
     pretrain, pretest, finetrain, finetest = read_log(logfile)
+    n_finetune_epochs = len(finetrain[0])
 
     pretrain_avg, pretrain_stddev = average_runs(pretrain, exclude_fields=("losses", "kmeans_losses"))
     pretest_avg, pretest_stddev = average_runs(pretest, exclude_fields=("losses", "kmeans_losses"))
-    finetrain_avg, finetrain_stddev = average_runs(finetrain)
-    finetest_avg, finetest_stddev = average_runs(finetest)
-
     plot(pretrain, pretrain_avg, pretrain_stddev, "pretrain", folder)
     plot(pretest, pretest_avg, pretest_stddev, "pretest", folder)
-    plot(finetrain, finetrain_avg, finetrain_stddev, "finetrain", folder)
-    plot(finetest, finetest_avg, finetest_stddev, "finetest", folder)
+
+    if n_finetune_epochs > 0:
+        finetrain_avg, finetrain_stddev = average_runs(finetrain)
+        finetest_avg, finetest_stddev = average_runs(finetest)
+        plot(finetrain, finetrain_avg, finetrain_stddev, "finetrain", folder)
+        plot(finetest, finetest_avg, finetest_stddev, "finetest", folder)
 
     summary_lines = []
     summary_lines.extend(summarize_results(
         pretrain_avg, pretrain_stddev, "pretrain", exclude_fields=("losses", "kmeans_losses")))
     summary_lines.extend(summarize_results(
         pretest_avg, pretest_stddev, "pretest", exclude_fields=("losses", "kmeans_losses")))
-    summary_lines.extend(summarize_results(finetrain_avg, finetrain_stddev, "finetrain"))
-    summary_lines.extend(summarize_results(finetest_avg, finetest_stddev, "finetest"))
+    if n_finetune_epochs > 0:
+        summary_lines.extend(summarize_results(finetrain_avg, finetrain_stddev, "finetrain"))
+        summary_lines.extend(summarize_results(finetest_avg, finetest_stddev, "finetest"))
     summary_file = folder / "summary.txt"
     with summary_file.open("w+") as file:
         file.writelines(summary_lines)
@@ -54,7 +57,7 @@ def read_log(filename):
     run = -1
     for line in log:
         # Don't read before the training started
-        if run == -1 and not "Run" in line:
+        if run == -1 and "Run" not in line:
             continue
         if "Run" in line:
             run += 1
@@ -193,6 +196,9 @@ class Metrics:
     def get_field_names(self):
         return [k for k, v in getmembers(self)
                 if not k.startswith("_") and not ismethod(v)]
+
+    def __len__(self):
+        return len(self.accuracies)
 
 
 if __name__ == "__main__":

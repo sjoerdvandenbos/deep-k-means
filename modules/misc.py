@@ -1,3 +1,5 @@
+from math import pi as PI, ceil
+
 from torch import nn
 import torch
 
@@ -64,9 +66,10 @@ class DeepKMeans(nn.Module):
 
 
 class PolarMapper(nn.Module):
-    def __init__(self):
+    def __init__(self, embedding_size, device):
         super().__init__()
-        self.embeddings_center = None
+        self.embeddings_center = torch.zeros((1, embedding_size), device=device)
+        self.center_is_defined = False
 
     def forward(self, x):
         batch_size, embeddings_size = x.shape
@@ -76,21 +79,59 @@ class PolarMapper(nn.Module):
         differences = x - center.expand(batch_size, -1)
         # print(f"differences.shape={differences.shape}")
         radiusses = differences.square().sum(dim=1).sqrt()
+        logradiusses = torch.log(radiusses)
+        # Normalize radiusses
+        # radiusses = radiusses / radiusses.mean()
         # print(f"radiusses: {radiusses.shape}")
         angles = torch.arctan(differences[:, 1] / (differences[:, 0] + 1e-6))
         # print(f"angles: {angles.shape}")
-        result = torch.cat((radiusses.unsqueeze(1), angles.unsqueeze(1)), dim=1)
+        result = torch.cat((logradiusses.unsqueeze(1), angles.unsqueeze(1)), dim=1)
         # print(f"result: {result.shape}")
         return result
 
-    def set_center(self, embeddings):
-        self.embeddings_center = embeddings.mean(dim=0, keepdim=True)
-
     def _get_center(self, x):
-        if self.embeddings_center is not None:
+        if self.center_is_defined:
             return self.embeddings_center
         else:
-            return x.mean(dim=0, keepdims=True)
+            return x.mean(dim=0, keepdim=True)
+
+    def update(self, embeds):
+        # Ensure there are no more feature vectors (rows) left as zero vectors.
+        if torch.all(torch.any(embeds.bool(), dim=1)):
+            self.embeddings_center = embeds.mean(dim=0, keepdim=True)
+            self.center_is_defined = True
+
+
+# class PolarMapperAlt1(PolarMapper):
+#     """ https://arxiv.org/pdf/2007.10588.pdf Page 4. This mapping assumes the center is at x=0;y=0."""
+#     def __init__(self, embedding_size, device):
+#         super().__init__(embedding_size, device)
+#
+#     def forward(self, x):
+#         batch_size, embeddings_size = x.shape
+#         assert embeddings_size == 2, "Only implemented for x and y, so 2 dims"
+#         center = self._get_center(x)
+#         differences = x - center.expand(batch_size, -1)
+#         x = differences[:, 0].clone()
+#         y = differences[:, 1].clone()
+#
+#     def vectorized_mapping(self, x, y):
+#         if x > 0 and y >= 0:
+#             return torch.arctan(y / x)
+#         elif x == 0 and y >= 0:
+#             return torch.full_like(x, PI / 2)
+#         elif x < 0 and y >= 0:
+#             return PI + torch.arctan(y / x)
+#         elif x < 0 and y < 0:
+#             return PI + torch.arctan(y / x)
+#         elif x == 0 and y < 0:
+#             return torch.full_like(x, 3 * PI / 2)
+#         elif x > 0 and y < 0:
+#             return 2*PI + torch.arctan(y / x)
+#         # x == 0 and y == 0
+#         else:
+#             # Hack this return value to prevent undefined value
+#             return torch.full_like(x, PI / 2)
 
 
 class LSTMDecoderEmpty(nn.LSTM):
@@ -102,33 +143,9 @@ class LSTMDecoderEmpty(nn.LSTM):
             raise NotImplementedError
 
     def forward(self, x, hidden_and_cell=None):
-        empty_input = torch.zeros_like(x)
-        return super().forward(empty_input, hidden_and_cell)
-
-
-class LSTMDecoderRecursive(nn.LSTM):
-    def __init__(self, input_size, hidden_size, num_layers=1, bias=True, batch_first=False, dropout=0,
-                 bidirectional=False, proj_size=0):
-        super().__init__(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, bias=bias,
-                         batch_first=batch_first, dropout=dropout, bidirectional=bidirectional, proj_size=proj_size)
-        if bidirectional or proj_size != 0:
-            raise NotImplementedError
-
-    def forward(self, x, hidden_and_cell=None):
-        seq_length = x.shape[1] if self.batch_first else x.shape[0]
-        assert seq_length == 1, "recursive forward only works with seq_len == 1"
-        batch_size = x.shape[0] if self.batch_first else x.shape[1]
-        if self.batch_first:
-            total_output = torch.zeros((batch_size, self.time_steps, x.shape[2]), device=x.device, dtype=x.dtype)
-            for t in range(self.time_steps):
-                x, hidden_and_cell = super().forward(x, hidden_and_cell)
-                total_output[:, t, :] = x.squeeze()
-        else:
-            total_output = torch.zeros((self.time_steps, batch_size, x.shape[2]), device=x.device, dtype=x.dtype)
-            for t in range(self.time_steps):
-                x, hidden_and_cell = super().forward(x, hidden_and_cell)
-                total_output[t, :, :] = x.squeeze()
-        return total_output, hidden_and_cell
+        empty_input = torch.zeros((x.shape[0], x.shape[1] - 1, x.shape[2]), device=x.device)
+        new_input = torch.cat((x[:, 0, :].unsqueeze(1), empty_input), dim=1)
+        return super().forward(new_input, hidden_and_cell)
 
 
 class LSTMDecoderMixedTeacherForcing(nn.LSTM):
@@ -141,32 +158,16 @@ class LSTMDecoderMixedTeacherForcing(nn.LSTM):
         self.teacher_forcing_probability = teacher_forcing_probability
 
     def forward(self, x, hidden_and_cell=None):
-        teacher_input = self._get_teacher_forcing_input(x)
         seq_length = x.shape[1] if self.batch_first else x.shape[0]
-        batch_size = x.shape[0] if self.batch_first else x.shape[1]
-        if self.batch_first:
-            total_output = torch.zeros((batch_size, seq_length, x.shape[2]), device=x.device, dtype=x.dtype)
-            for t in range(seq_length):
-                if torch.rand((1,), device=x.device) < self.teacher_forcing_probability:
-                    x = teacher_input[:, t, :]
-                x, hidden_and_cell = super().forward(x, hidden_and_cell)
-                total_output[:, t, :] = x.squeeze()
-        else:
-            total_output = torch.zeros((seq_length, batch_size, x.shape[2]), device=x.device, dtype=x.dtype)
-            for t in range(seq_length):
-                if torch.rand((1,), device=x.device) < self.teacher_forcing_probability:
-                    x = teacher_input[t, :, :]
-                x, hidden_and_cell = super().forward(x, hidden_and_cell)
-                total_output[t, :, :] = x.squeeze()
-        return total_output, hidden_and_cell
-
-    def _get_teacher_forcing_input(self, x):
-        teacher_input = torch.zeros_like(x)
-        if self.batch_first:
-            teacher_input[:, 1:, :] = x[:, 1:, :]
-        else:
-            teacher_input[1:, :, :] = x[1:, :, :]
-        return teacher_input
+        outputs = []
+        for t in range(seq_length):
+            if torch.rand((1,), device=x.device) < self.teacher_forcing_probability or t == 0:
+                temp_input = x[:, t, :].unsqueeze(1)
+            else:
+                temp_input = out
+            out, hidden_and_cell = super().forward(temp_input, hidden_and_cell)
+            outputs.append(out)
+        return torch.cat(outputs, dim=1), hidden_and_cell
 
 
 class DualLSTMDecoderAdapter(nn.Module):
@@ -174,17 +175,23 @@ class DualLSTMDecoderAdapter(nn.Module):
         super().__init__()
         self.reconstruction_decoder = reconstruction_decoder
         self.prediction_decoder = prediction_decoder
+        self.input_size = reconstruction_decoder.input_size
+        self.hidden_size = reconstruction_decoder.hidden_size
+        self.num_layers = reconstruction_decoder.num_layers
 
     def forward(self, x, hidden_and_cell=None):
+        # last output of the encoder
+        last_output = x[:, 0, :].unsqueeze(1)
+        # length of the encoder and length of the decoder
+        length = x.shape[1] // 2
         # divide input into a reconstruction part and a future part
-        reconstruction_part, future_part = x.split(2, dim=1)
-        # flip the reconstruction part
-        reconstruction_part = reconstruction_part.flip(dim=1)
+        reconstruction_part = x[:, :length, :]
+        future_part = torch.cat((last_output, x[:, length:-1, :]), dim=1)
         # forward pass of the reconstruction part
         reconstruction, _ = self.reconstruction_decoder(reconstruction_part, hidden_and_cell)
         # forward pass of the prediction part
         prediction, _ = self.prediction_decoder(future_part, hidden_and_cell)
         # reconstruction is flipped back to the initial order
-        reconstruction = reconstruction.flip(dim=1)
+        reconstruction = reconstruction.flip(1)
         output = torch.cat((reconstruction, prediction), dim=1)
         return output, None

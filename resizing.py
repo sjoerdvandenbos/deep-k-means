@@ -92,7 +92,7 @@ def _get_resized_indices(new_size, old_indices, target):
 
 
 def _write_smaller_npy(path, train_indices, test_indices, name):
-    data, target = _load_and_merge_npy(path, train_indices, test_indices)
+    sexes, patient_numbers, data, target = _load_and_merge_npy(path, train_indices, test_indices)
     destination = path / name
     destination.mkdir(parents=False, exist_ok=True)
     save_npy(destination, data, target)
@@ -103,16 +103,26 @@ def _write_smaller_npy(path, train_indices, test_indices, name):
     last_test_index = len(train_indices) + len(test_indices)
     pd.DataFrame(np.arange(first_test_index, last_test_index)).to_csv(destination / "validation", index=False,
                                                                       header=False)
+    pd.DataFrame(sexes).to_csv(destination / "sexes.csv", index=False, header=False)
+    pd.DataFrame(patient_numbers).to_csv(destination / "patient_numbers.csv", index=False, header=False)
     summarize(destination)
 
 
 def _load_and_merge_npy(path, train_indices, test_indices):
     data, target = load_npy(path)
+    sexes = read_list(path / "sexes.csv", "str")
+    patient_numbers = read_list(path / "patient_numbers.csv")
+    train_sexes = sexes[train_indices]
+    test_sexes = sexes[test_indices]
+    train_patient_numbers = patient_numbers[train_indices]
+    test_patient_numbers = patient_numbers[test_indices]
     train_data = data[train_indices]
     train_target = target[train_indices]
     test_data = data[test_indices]
     test_target = target[test_indices]
     return (
+        np.concatenate((train_sexes, test_sexes), axis=0),
+        np.concatenate((train_patient_numbers, test_patient_numbers), axis=0),
         np.concatenate((train_data, test_data), axis=0),
         np.concatenate((train_target, test_target), axis=0),
     )
@@ -131,16 +141,18 @@ def save_npy(path, data, target):
 
 if __name__ == "__main__":
     np.random.seed(500)
-    directory = Path(__file__).parent / "split" / "ptb-12lead-matrices-40hz"
+    directory = Path(__file__).parent / "split" / "ptb-12lead-matrices-gaussian-normalized"
     labels = ("HealthyControl", "BundleBranchBlock")
-    # shrink_matrices_dataset_by_avgpool(directory, 25, "ptb-12lead-matrices-40hz")
+    new_dirname = "ptb-12lead-matrices-gaussian-normalized-100hz"
+    # shrink_matrices_dataset_by_avgpool(directory, 10, new_dirname)
     # shrink_matrices_dataset_by_leads(
-    #     dataset_dir="ptb-matrices",
+    #     dataset_dir=directory,
     #     leads=np.arange(12),
     # )
+    new_dir = directory.parent / new_dirname
     shrink_dataset_by_label_filtering(
         labels_to_use=labels,
-        dataset_dir=directory,
+        dataset_dir=new_dir,
         name=f"all_samples_{len(labels)}_diseases"
     )
     # shrink_dataset_by_number_and_filter(

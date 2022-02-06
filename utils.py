@@ -3,6 +3,8 @@
 __author__ = "Thibaut Thonet, Maziar Moradi Fard"
 __license__ = "GPL"
 
+from pathlib import Path
+
 import numpy as np
 import os
 from scipy.optimize import linear_sum_assignment as linear_assignment
@@ -46,12 +48,14 @@ def map_clusterlabels_to_groundtruth(gtruth, cluster_label):
     return np.array([truth_map[e.item()] for e in cluster_label])
 
 
-def get_clusterlabel_to_groundtruth_map(gtruth, cluster_label):
+def get_clusterlabel_to_groundtruth_map(gtruths, cluster_labels):
     """ Returns a map clabel -> gtruth. """
-    D = max(cluster_label.max().item(), gtruth.max().item()) + 1
+    gtruths = gtruths.long()
+    cluster_labels = cluster_labels.long()
+    D = max(cluster_labels.max(), gtruths.max()) + 1
     w = torch.zeros((D, D), dtype=torch.long)
-    for i in range(cluster_label.size(0)):
-        w[cluster_label[i], gtruth[i]] += 1
+    for i in range(cluster_labels.size(0)):
+        w[cluster_labels[i], gtruths[i]] += 1
     ind = linear_assignment(w.max() - w) # Optimal label mapping based on the Hungarian algorithm
     return dict(zip(ind[0], ind[1]))
 
@@ -132,7 +136,7 @@ def write_dataset(path, name, data, target, train_indices, validation_indices):
 
 def read_list(file_name, type='int'):
     with open(file_name, 'r') as f:
-        lines = f.readlines()
+        lines = f.read().splitlines()
     if type == 'str':
         array = np.asarray([l.strip() for l in lines])
         return array
@@ -162,3 +166,20 @@ def get_color_map(n_colors, is_darker=False):
 def _darken_rgba(rgba_tuple, factor=1.5):
     r, g, b, a = rgba_tuple
     return r/factor, g/factor, b/factor, a
+
+
+def path_contains_dataset(path):
+    path_obj = Path(__file__).parent / "split" / path
+    files = path_obj.glob("*")
+    names = [f.name for f in files]
+    data_exists = (
+            "compacted_data.npy" in names
+            and "compacted_target.npy" in names
+            and "train" in names
+            and "validation" in names
+    )
+    if data_exists:
+        return True
+    else:
+        print(f"no (complete) dataset found at given path: {path}\n files found here: {names}")
+        return False
