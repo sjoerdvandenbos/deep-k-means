@@ -1,0 +1,2 @@
+python -m cli -d=PTB -s -e=10 -f=0 -n=10 -a=convo_autoencoder -w --embedding_size=25 --dataset_path=ptb-12lead-fft-plot-s30k/all_samples_2_diseases
+python -m cli -d=PTB -s -e=10 -f=0 -n=10 -a=convo_autoencoder -w --embedding_size=25 --dataset_path=ptb-12lead-fft-plot-s60k/all_samples_2_diseases

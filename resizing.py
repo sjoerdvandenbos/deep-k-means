@@ -141,9 +141,9 @@ def save_npy(path, data, target):
 
 if __name__ == "__main__":
     np.random.seed(500)
-    directory = Path(__file__).parent / "split" / "ptb-12lead-matrices-gaussian-normalized"
+    directory = Path(__file__).parent / "split" / "imaged_ptb_3_channel"
     labels = ("HealthyControl", "BundleBranchBlock")
-    new_dirname = "ptb-12lead-matrices-gaussian-normalized-100hz"
+    new_dirname = "all_samples_2_diseases"
     # shrink_matrices_dataset_by_avgpool(directory, 10, new_dirname)
     # shrink_matrices_dataset_by_leads(
     #     dataset_dir=directory,
@@ -152,7 +152,7 @@ if __name__ == "__main__":
     new_dir = directory.parent / new_dirname
     shrink_dataset_by_label_filtering(
         labels_to_use=labels,
-        dataset_dir=new_dir,
+        dataset_dir=directory,
         name=f"all_samples_{len(labels)}_diseases"
     )
     # shrink_dataset_by_number_and_filter(

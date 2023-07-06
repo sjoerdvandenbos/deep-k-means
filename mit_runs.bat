@@ -1,0 +1,2 @@
+REM python -m cli --data_format=image -s -w -e=50 -b=256 -n=10 -a=convo_autoencoder -w --embedding_size=10 --dataset_path=mit-plot-catted
+python -m cli --data_format=image -s -w -e=50 -b=256 -n=10 -a=convo_autoencoder -w --embedding_size=10 --dataset_path=mit-summed-normalized

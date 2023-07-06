@@ -4,6 +4,8 @@ from pathlib import Path
 
 import torch
 
+from utils import write_list
+
 
 class Learner:
 
@@ -16,12 +18,17 @@ class Learner:
         self.seeded = args.seeded                                        # Specify if runs are seeded
         self.n_runs = args.number_runs
         self.is_writing_to_disc = args.write_files
-        self.dataset_name = args.dataset
+        self.data_format = args.data_format
+        self.target_file = args.target_file
         # Parameter setting from dataset specs
         self.dataset_path = specs.dataset_path
         self.n_channels = specs.n_channels
         self.n_clusters = specs.n_clusters
         self.trainset, self.testset = specs.trainset, specs.testset
+        self.train_indices = specs.train_indices
+        self.test_indices = specs.test_indices
+        self.test_ids = specs.test_ids
+        self.train_ids = specs.train_ids
         self.img_height, self.img_width = specs.img_height, specs.img_width
         # Setting derived parameters
         self.test_size = self.batch_size
@@ -38,10 +45,7 @@ class Learner:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         if args.cpu:
             self.device = "cpu"
-        self.inverse_disease_mapping = specs.inverse_disease_mapping if (
-                self.dataset_name == "PTB" or
-                self.dataset_name == "PTBMAT"
-        ) else None
+        self.inverse_disease_mapping = specs.inverse_disease_mapping
         self._setup_logging()
 
     def _log(self, content):
@@ -53,15 +57,16 @@ class Learner:
     def _setup_logging(self):
         now = datetime.now()
         time_format = "%Y_%m_%dT%H_%M"
-        experiment_id = f"{self.dataset_name}_e_{self.n_pretrain_epochs}_f_{self.n_finetuning_epochs}_bs" \
+        experiment_id = f"{self.data_format}_e_{self.n_pretrain_epochs}_f_{self.n_finetuning_epochs}_bs" \
                         f"_{self.batch_size}_" \
                         f"{now.strftime(time_format)}"
         self.directory = Path.cwd() / "metrics" / experiment_id
         if self.is_writing_to_disc:
             self.directory.mkdir()
         self.logfile = self.directory / "log.txt"
-
         self._log(f"Hyperparameters: lambda={self.lambda_}, pretrain_epochs={self.n_pretrain_epochs}, "
                   f"finetune_epochs={self.n_finetuning_epochs}, batch_size={self.batch_size}, "
                   f"initial_lr={self.lr}, n_runs={self.n_runs}, embedding_size={self.embedding_size}, "
-                  f"dataset_path={self.dataset_path}")
+                  f"dataset_path={self.dataset_path}, target_file={self.target_file}")
+        write_list(self.directory / "train.csv", self.train_indices)
+        write_list(self.directory / "validation.csv", self.test_indices)

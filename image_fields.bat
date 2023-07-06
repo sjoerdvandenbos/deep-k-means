@@ -1,0 +1,1 @@
+python -m cli -n=10 -e=50 -b=256 -s -w --data_format=image_fields -a=convo_autoencoder --embedding_size=10 --dataset_path=imaged_ptb_3_channel/all_samples_2_diseases

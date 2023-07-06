@@ -1,7 +1,7 @@
 .idea
 .python-version
 __pycache__
-split
+split/
 metrics/
 
 

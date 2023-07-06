@@ -8,14 +8,15 @@ from pathlib import Path
 import numpy as np
 import os
 from scipy.optimize import linear_sum_assignment as linear_assignment
+from re import compile
 import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset
 
 
 class ImgSet(Dataset):
-
     def __init__(self, source: np.ndarray, target: np.ndarray):
+        print(f"source shape: {source.shape}")
         self.data = torch.as_tensor(source)
         self.target = torch.as_tensor(target)
 
@@ -25,6 +26,36 @@ class ImgSet(Dataset):
 
     def __len__(self):
         return self.data.shape[0]
+
+
+class MatrixSet(Dataset):
+    def __init__(self, source: np.ndarray, target: np.ndarray):
+        print(f"source shape: {source.shape}")
+        self.data = torch.as_tensor(source)
+        self.target = torch.as_tensor(target)
+
+    def __getitem__(self, index):
+        transformed = self.data[index].float()
+        return index, transformed, self.target[index]
+
+    def __len__(self):
+        return self.data.shape[0]
+
+
+def get_ground_truths(directory: Path, label_file):
+    target = read_list(directory / label_file, "str")
+    test_indices = read_list(directory / "validation")
+    return target[test_indices]
+
+
+def get_dataset_dir(metrics_dir):
+    log = metrics_dir / "log.txt"
+    regex = r"^.*dataset_path=(.*),.*$"
+    state_machine = compile(regex)
+    for line in log.open("r"):
+        if state_machine.match(line):
+            data_dir = state_machine.match(line).group(1)
+            return Path(data_dir)
 
 
 def cluster_acc(y_true, y_pred):
@@ -43,21 +74,30 @@ def cluster_acc(y_true, y_pred):
     return sum(correct) / correct.shape[0]
 
 
-def map_clusterlabels_to_groundtruth(gtruth, cluster_label):
-    truth_map = get_clusterlabel_to_groundtruth_map(gtruth, cluster_label)
-    return np.array([truth_map[e.item()] for e in cluster_label])
+def map_clusterlabels_to_groundtruth(gtruth, cluster_label, n_unique_cluster_labels=-1):
+    truth_map = get_clusterlabel_to_groundtruth_map(gtruth, cluster_label, n_unique_cluster_labels)
+    return torch.tensor([truth_map[e.item()] for e in cluster_label])
 
 
-def get_clusterlabel_to_groundtruth_map(gtruths, cluster_labels):
+def get_clusterlabel_to_groundtruth_map(gtruths, cluster_labels, n_unique_cluster_labels=-1):
     """ Returns a map clabel -> gtruth. """
-    gtruths = gtruths.long()
-    cluster_labels = cluster_labels.long()
-    D = max(cluster_labels.max(), gtruths.max()) + 1
-    w = torch.zeros((D, D), dtype=torch.long)
-    for i in range(cluster_labels.size(0)):
-        w[cluster_labels[i], gtruths[i]] += 1
-    ind = linear_assignment(w.max() - w) # Optimal label mapping based on the Hungarian algorithm
-    return dict(zip(ind[0], ind[1]))
+    # gtruths = gtruths.long()
+    # cluster_labels = cluster_labels.long()
+    # D = max(cluster_labels.max(), gtruths.max()) + 1
+    # w = torch.zeros((D, D), dtype=torch.long)
+    # for i in range(cluster_labels.size(0)):
+    #     w[cluster_labels[i], gtruths[i]] += 1
+    # ind = linear_assignment(w.max() - w) # Optimal label mapping based on the Hungarian algorithm
+    # return dict(zip(ind[0], ind[1]))
+    if n_unique_cluster_labels == -1:
+        n_unique_cluster_labels = cluster_labels.max() + 1  # Assuming labels are encoded to range(num_classes)
+    correlation_map = torch.zeros((n_unique_cluster_labels, gtruths.max() + 1))
+    for i in range(len(gtruths)):
+        if cluster_labels[i] != -1:     # Makes this work with dbscan.
+            correlation_map[cluster_labels[i], gtruths[i]] += 1
+    cluster_map = {i: v for i, v in enumerate(correlation_map.argmax(dim=1))}
+    cluster_map.update({-1: -1})    # Makes this work with dbscan.
+    return cluster_map
 
 
 def conv_regularization_loss(autoencoder):
@@ -135,6 +175,8 @@ def write_dataset(path, name, data, target, train_indices, validation_indices):
 
 
 def read_list(file_name, type='int'):
+    if Path(file_name).suffix == ".npy":
+        return np.load(file_name)
     with open(file_name, 'r') as f:
         lines = f.read().splitlines()
     if type == 'str':
@@ -174,12 +216,9 @@ def path_contains_dataset(path):
     names = [f.name for f in files]
     data_exists = (
             "compacted_data.npy" in names
-            and "compacted_target.npy" in names
-            and "train" in names
-            and "validation" in names
     )
     if data_exists:
         return True
     else:
-        print(f"no (complete) dataset found at given path: {path}\n files found here: {names}")
+        print(f"no (complete) dataset found at given path: {path_obj}\n files found here: {names}")
         return False

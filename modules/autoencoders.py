@@ -1,14 +1,20 @@
 import torch
 from torch import nn
 
-from modules.layers import OrthogonalLinearLayer, ReshapeLayer, InterpolateLayer, OrthogonalConv2d
-from modules.utils import get_post_conv_height_and_width, get_output_padding
-from modules.blocks import BottleneckConvBlock, BottleneckConvTransposeBlock, BasicConvBlock, BasicConvTransposeBlock
+from modules.layers import OrthogonalLinearLayer, ReshapeLayer, InterpolateLayer
+from modules.utils import get_post_conv_height_and_width, get_output_padding, get_output_padding_length, \
+    get_post_conv_length
+from modules.blocks import BottleneckConvBlock, BottleneckConvTransposeBlock, BasicConvBlock, BasicConvTransposeBlock, \
+    ConvBlock1D, ConvTransposeBlock1D
+from modules.inception import InceptionResNetV2
 
 
-def get_autoencoder(name, height, width, embedding_size, n_channels, n_layers=1, decoder_input_type="EMPTY") -> nn.Module:
+def get_autoencoder(name, height, width, embedding_size, n_channels,
+                    n_layers=1, decoder_input_type="EMPTY") -> nn.Module:
     if name == "CONVO_AUTOENCODER":
         return ConvAutoencoder(height, width, embedding_size, n_channels)
+    elif name == "CONVO_AUTOENCODER_1D":
+        return ConvoAutoencoder1D(input_size=width, n_channels=height, embedding_size=embedding_size)
     elif name == "FC_AUTOENCODER":
         return StackedAutoencoder(height, width, embedding_size, n_channels)
     elif name == "OLM_AUTOENCODER":
@@ -25,6 +31,10 @@ def get_autoencoder(name, height, width, embedding_size, n_channels, n_layers=1,
     elif name == "RESNET_AUTOENCODER_10":
         return ResnetConvoAutoencoder(height, width, embedding_size, n_channels, BasicConvBlock,
                                       BasicConvTransposeBlock, (1, 1, 1, 1))
+    elif name == "VARIATIONAL_AUTOENCODER":
+        return VariationalAutoencoder1d2(400)
+    elif name == "INCEPTIONRESNETV2":
+        return InceptionResNetV2(height, width, embedding_size, n_channels)
     else:
         print("Autoencoder not found!")
         exit()
@@ -319,7 +329,8 @@ class ResnetConvoAutoencoder(nn.Module):
             down_sampler = nn.Sequential(
                 nn.Conv2d(self.in_channels, n_channels*blocktype.expansion, kernel_size=1, stride=stride, padding=0),
                 nn.BatchNorm2d(n_channels*blocktype.expansion),
-                nn.Dropout2d(p=0.1))
+                # nn.Dropout2d(p=0.1),
+            )
         # Create first block potentially changing the number of channels
         layers.append(blocktype(self.in_channels, n_channels, down_sampler=down_sampler, stride=stride))
         self.in_channels = n_channels*blocktype.expansion
@@ -329,7 +340,7 @@ class ResnetConvoAutoencoder(nn.Module):
         return nn.Sequential(*layers)
 
     def _make_reverse_section(self, post_conv_transpose_height, post_conv_transpose_width, blocktype, n_blocks,
-                              n_channels, stride=1, last=False):
+                              n_channels, stride=1):
         post_conv_height, post_conv_width = get_post_conv_height_and_width(post_conv_transpose_height,
                                                                            post_conv_transpose_width, 2)
         output_pad_height, output_pad_width = get_output_padding(post_conv_transpose_height,
@@ -345,7 +356,7 @@ class ResnetConvoAutoencoder(nn.Module):
                 nn.ConvTranspose2d(self.in_channels, n_channels*stride, kernel_size=1, stride=stride,
                                    padding=0, output_padding=(output_pad_height, output_pad_width)),
                 nn.BatchNorm2d(n_channels*stride),
-                nn.Dropout2d(p=0.1),
+                # nn.Dropout2d(p=0.1),
             )
             # Create last block potentially changing the number of channels
             layers.append(blocktype(post_conv_transpose_height, post_conv_transpose_width, self.in_channels,
@@ -357,7 +368,7 @@ class ResnetConvoAutoencoder(nn.Module):
                 nn.ConvTranspose2d(self.in_channels, n_channels//stride, kernel_size=1, stride=stride,
                                    padding=0, output_padding=(output_pad_height, output_pad_width)),
                 nn.BatchNorm2d(n_channels//stride),
-                nn.Dropout2d(p=0.1),
+                # nn.Dropout2d(p=0.1),
             )
             # Create last block potentially changing the number of channels
             layers.append(blocktype(post_conv_transpose_height, post_conv_transpose_width, self.in_channels,
@@ -386,3 +397,153 @@ class ResnetConvoAutoencoder(nn.Module):
             return module(x, self.maxpool_indices, output_size=self.post_max_unpool_dims)
         else:
             return module(x)
+
+
+class VariationalAutoencoder1d(nn.Module):
+    def __init__(self, input_size):
+        super().__init__()
+        self.input_size = input_size
+        self.embedding_size = input_size // 16
+        self.conv_encoder = nn.Sequential(
+            ConvBlock1D(in_channels=1, out_channels=8, kernel_size=11, padding=5, stride=1),
+            nn.MaxPool1d(2, 2, 0, return_indices=True),
+            ConvBlock1D(in_channels=8, out_channels=16, kernel_size=7, padding=3, stride=1),
+            nn.MaxPool1d(2, 2, 0, return_indices=True),
+            ConvBlock1D(in_channels=16, out_channels=32, kernel_size=5, padding=2, stride=1),
+            nn.MaxPool1d(2, 2, 0, return_indices=True),
+            ConvBlock1D(in_channels=32, out_channels=32, kernel_size=3, padding=1, stride=1),
+            nn.MaxPool1d(2, 2, 0, return_indices=True),
+            nn.Conv1d(in_channels=32, out_channels=1, kernel_size=3, stride=1, padding=1),
+            nn.Flatten(),
+        )
+        output_pad1 = get_output_padding_length(50, 2)
+        output_pad2 = get_output_padding_length(100, 2)
+        output_pad3 = get_output_padding_length(200, 2)
+        output_pad4 = get_output_padding_length(400, 2)
+        self.conv_decoder = nn.Sequential(
+            ReshapeLayer(-1, 1, self.embedding_size),
+            nn.ConvTranspose1d(in_channels=1, out_channels=32, kernel_size=3, stride=2, padding=1,
+                               output_padding=output_pad1),
+            # nn.MaxUnpool1d(2, 2, 0),
+            ConvTransposeBlock1D(in_channels=32, out_channels=32, kernel_size=3, stride=2, padding=1,
+                                 output_padding=output_pad2),
+            # nn.MaxUnpool1d(2, 2, 0),
+            ConvTransposeBlock1D(in_channels=32, out_channels=16, kernel_size=3, stride=2, padding=1,
+                                 output_padding=output_pad3),
+            # nn.MaxUnpool1d(2, 2, 0),
+            ConvTransposeBlock1D(in_channels=16, out_channels=8, kernel_size=3, stride=2, padding=1,
+                                 output_padding=output_pad4),
+            # nn.MaxUnpool1d(2, 2, 0),
+            ConvTransposeBlock1D(in_channels=8, out_channels=1, kernel_size=3, stride=1, padding=1, output_padding=0),
+        )
+        self.linear_encoder = nn.Sequential(
+            nn.Linear(input_size, input_size//2),
+            nn.Linear(input_size//2, input_size//8),
+            nn.Linear(input_size//8, self.embedding_size),
+        )
+        self.linear_decoder = nn.Sequential(
+            nn.Linear(self.embedding_size, input_size//8),
+            nn.Linear(input_size//8, input_size//2),
+            nn.Linear(input_size//2, input_size),
+        )
+        self.mean_layer = nn.Linear(2*self.embedding_size, self.embedding_size)
+        self.std_dev_layer = nn.Linear(2*self.embedding_size, self.embedding_size)
+        self.decoding_combiner = nn.Linear(2*input_size, input_size)
+
+    def forward(self, x):
+        x = x.squeeze(2)
+        conv_encoding = self.conv_encoder(x)
+        linear_encoding = self.linear_encoder(x.squeeze(1))
+        catted_encoding = torch.cat((conv_encoding, linear_encoding), dim=1)
+
+        means = self.mean_layer(catted_encoding)
+        log_var = self.std_dev_layer(catted_encoding)
+        standard_samples = torch.randn_like(means, device="cuda")
+        embeds = means + standard_samples * log_var.exp().sqrt()
+
+        linear_decoding = self.linear_decoder(embeds)
+        conv_decoding = self.conv_decoder(embeds)
+        catted_decoding = torch.cat((linear_decoding, conv_decoding.squeeze(1)), dim=1)
+        reconstruction = self.decoding_combiner(catted_decoding)
+        return embeds, reconstruction.unsqueeze(1).unsqueeze(2), means, log_var
+
+    def decode(self, embeds):
+        linear_decoding = self.linear_decoder(embeds)
+        conv_decoding = self.conv_decoder(embeds.unsqueeze(1))
+        catted_decoding = torch.cat((linear_decoding, conv_decoding.squeeze(1)), dim=1)
+        reconstruction = self.decoding_combiner(catted_decoding)
+        return reconstruction
+
+
+class VariationalAutoencoder1d2(VariationalAutoencoder1d):
+    def __init__(self, input_size):
+        super().__init__(input_size)
+        self.input_size = input_size
+        self.embedding_size = input_size // 16
+
+        self.conv_encoder = nn.Sequential(
+            ReshapeLayer(-1, 1, input_size),
+            ConvBlock1D(1, 8, kernel_size=5, stride=1, padding=2),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            ConvBlock1D(8, 16, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            ConvBlock1D(16, 32, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            ConvBlock1D(32, 32, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            nn.Conv1d(32, 1, kernel_size=3, stride=1, padding=1),
+            nn.Flatten(),
+        )
+
+        self.conv_decoder = nn.Sequential(
+            ReshapeLayer(-1, 1, self.embedding_size),
+            ConvBlock1D(1, 32, kernel_size=3, stride=1, padding=1),
+            nn.Upsample(scale_factor=2),
+            ConvBlock1D(32, 32, kernel_size=3, stride=1, padding=1),
+            nn.Upsample(scale_factor=2),
+            ConvBlock1D(32, 16, kernel_size=3, stride=1, padding=1),
+            nn.Upsample(scale_factor=2),
+            ConvBlock1D(16, 8, kernel_size=5, stride=1, padding=2),
+            nn.Upsample(scale_factor=2),
+            nn.Conv1d(8, 1, kernel_size=3, stride=1, padding=1),
+        )
+
+
+class ConvoAutoencoder1D(nn.Module):
+    def __init__(self, input_size, n_channels, embedding_size):
+        super().__init__()
+        post1_size = get_post_conv_length(input_size, stride=2, kernel_size=7, padding=0)
+        post2_size = get_post_conv_length(post1_size, stride=2, kernel_size=5, padding=0)
+        post3_size = get_post_conv_length(post2_size, stride=2, kernel_size=3, padding=0)
+        output_padding1 = get_output_padding_length(input_size, stride=2)
+        output_padding2 = get_output_padding_length(post1_size, stride=2)
+        output_padding3 = get_output_padding_length(post2_size, stride=2)
+        self.encoder = nn.Sequential(
+            ConvBlock1D(n_channels, 32, kernel_size=7, stride=2, padding=0),
+            ConvBlock1D(32, 64, kernel_size=5, stride=2, padding=0),
+            ConvBlock1D(64, 128, kernel_size=3, stride=2, padding=0, activation=False),
+            nn.Flatten(),
+            nn.Linear(post3_size*128, embedding_size),
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(embedding_size, post3_size*128),
+            ReshapeLayer(-1, 128, post3_size),
+            ConvTransposeBlock1D(128, 64, kernel_size=3, stride=2, padding=0, output_padding=output_padding3),
+            ConvTransposeBlock1D(64, 32, kernel_size=5, stride=2, padding=0, output_padding=output_padding2),
+            ConvTransposeBlock1D(32, n_channels, kernel_size=7, stride=2, padding=0, output_padding=output_padding1,
+                                 batch_norm=False, activation=False),
+        )
+
+    def forward(self, x):
+        x = self.encoder(x)
+        embeds = x
+        x = self.decoder(x)
+        return embeds, x
+
+
+if __name__ == "__main__":
+    iput = torch.rand(1, 3, 1000)
+    _, c, s = iput.shape
+    encoder = ConvoAutoencoder1D(s, c, 10)
+    e, r = encoder(iput)
+    print(r.shape)

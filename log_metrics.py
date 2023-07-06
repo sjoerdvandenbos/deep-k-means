@@ -9,6 +9,7 @@ import numpy as np
 ACC_REGEX = compile(r"^(?:Test|Train) ACC: (?P<acc>[01]\.[0-9]+$)")
 ARI_REGEX = compile(r"ARI: (?P<ari>.*$)")
 NMI_REGEX = compile(r"NMI: (?P<nmi>.*$)")
+MMD_REGEX = compile(r"^(?:Test|Train) MMD: (?P<mmd>[01]\.[0-9]+$)")
 LOSS_REGEX = compile(r"^(?:Train|Test) loss: (?P<loss>.*$)")
 AE_LOSS_REGEX = compile(r"^(?:Train|Test) auto encoder loss: (?P<ae_loss>.*$)")
 KMEANS_LOSS_REGEX = compile(r"kmeans loss: (?P<kmeans_loss>.*$)")
@@ -23,25 +24,25 @@ def write_visuals_and_summary(folder):
     pretrain, pretest, finetrain, finetest = read_log(logfile)
     n_finetune_epochs = len(finetrain[0])
 
-    pretrain_avg, pretrain_stddev = average_runs(pretrain, exclude_fields=("losses", "kmeans_losses"))
-    pretest_avg, pretest_stddev = average_runs(pretest, exclude_fields=("losses", "kmeans_losses"))
+    pretrain_avg, pretrain_stddev = average_runs(pretrain, exclude_fields=("losses", "kmeans_losses", "mmd"))
+    pretest_avg, pretest_stddev = average_runs(pretest, exclude_fields=("losses", "kmeans_losses", "mmd"))
     plot(pretrain, pretrain_avg, pretrain_stddev, "pretrain", folder)
     plot(pretest, pretest_avg, pretest_stddev, "pretest", folder)
 
     if n_finetune_epochs > 0:
-        finetrain_avg, finetrain_stddev = average_runs(finetrain)
-        finetest_avg, finetest_stddev = average_runs(finetest)
+        finetrain_avg, finetrain_stddev = average_runs(finetrain, exclude_fields=("mmd"))
+        finetest_avg, finetest_stddev = average_runs(finetest, exclude_fields=("mmd"))
         plot(finetrain, finetrain_avg, finetrain_stddev, "finetrain", folder)
         plot(finetest, finetest_avg, finetest_stddev, "finetest", folder)
 
     summary_lines = []
     summary_lines.extend(summarize_results(
-        pretrain_avg, pretrain_stddev, "pretrain", exclude_fields=("losses", "kmeans_losses")))
+        pretrain_avg, pretrain_stddev, "pretrain", exclude_fields=("losses", "kmeans_losses", "mmd")))
     summary_lines.extend(summarize_results(
-        pretest_avg, pretest_stddev, "pretest", exclude_fields=("losses", "kmeans_losses")))
+        pretest_avg, pretest_stddev, "pretest", exclude_fields=("losses", "kmeans_losses", "mmd")))
     if n_finetune_epochs > 0:
-        summary_lines.extend(summarize_results(finetrain_avg, finetrain_stddev, "finetrain"))
-        summary_lines.extend(summarize_results(finetest_avg, finetest_stddev, "finetest"))
+        summary_lines.extend(summarize_results(finetrain_avg, finetrain_stddev, "finetrain", exclude_fields=("mmd")))
+        summary_lines.extend(summarize_results(finetest_avg, finetest_stddev, "finetest", exclude_fields=("mmd")))
     summary_file = folder / "summary.txt"
     with summary_file.open("w+") as file:
         file.writelines(summary_lines)
@@ -97,6 +98,8 @@ def read_line(line, metrics):
         metrics.aris.append(ARI_REGEX.search(line).group("ari"))
     elif NMI_REGEX.search(line):
         metrics.nmis.append(NMI_REGEX.search(line).group("nmi"))
+    elif MMD_REGEX.match(line):
+        metrics.mmd.append(MMD_REGEX.match(line).group("mmd"))
     elif LOSS_REGEX.search(line):
         metrics.losses.append(LOSS_REGEX.search(line).group("loss"))
     elif AE_LOSS_REGEX.search(line):
@@ -115,6 +118,10 @@ def plot(metrics, means, stddev, phase, folder):
         means_series = getattr(means, name)
         deviation = getattr(stddev, name)
         x = np.arange(0, len(means_series))
+        if "loss" in name or "mmd" in name:
+            plt.yscale("log")
+        else:
+            plt.yscale("linear")
         plt.fill_between(x, means_series + 2*deviation, means_series - 2*deviation, alpha=0.3)
         plt.xlabel("epochs")
         plt.title(f"{phase} {name}")
@@ -175,6 +182,7 @@ class Metrics:
         self.accuracies = []
         self.aris = []
         self.nmis = []
+        self.mmd = []
 
     def convert_to_numpy(self):
         result = Metrics()
@@ -184,6 +192,7 @@ class Metrics:
         result.accuracies = np.array(self.accuracies, dtype=float)
         result.aris = np.array(self.aris, dtype=float)
         result.nmis = np.array(self.nmis, dtype=float)
+        result.mmd = np.array(self.mmd, dtype=float)
         return result
 
     def deep_copy(self):

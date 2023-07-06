@@ -5,6 +5,7 @@ import pandas as pd
 import skimage.measure
 
 from ptb_img_utils import get_filenames_and_labels
+from utils import read_list
 
 
 def get_matrix_data(dataset_dir):
@@ -20,10 +21,13 @@ def get_matrix_data(dataset_dir):
     return data, diseases
 
 
-def get_matrix_data_from_npy(dataset_dir):
+def get_matrix_data_from_npy(dataset_dir, target_file):
     print("loading matrix data", flush=True)
     data = np.load(dataset_dir / "compacted_data.npy")
-    diseases = np.load(dataset_dir / "compacted_target.npy").flatten()
+    if target_file[-3:] == "csv":
+        diseases = read_list(dataset_dir / target_file, "str")
+    else:
+        diseases = np.load(dataset_dir / target_file).flatten()
     print("done", flush=True)
     return data, diseases
 

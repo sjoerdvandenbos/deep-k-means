@@ -70,9 +70,20 @@ class BCEWithLogitsLoss:
         self.name = "BCE with logits loss"
         self.bce = torch.nn.BCEWithLogitsLoss()
 
-    @staticmethod
     def __call__(self, prediction, truth):
         return self.bce(prediction, truth)
+
+    def __str__(self):
+        return self.name
+
+
+class KLDivLoss:
+    def __init__(self):
+        self.name = "Kulback-Leibler divergence loss"
+        self.loss = torch.nn.KLDivLoss(reduction="batchmean")
+
+    def __call__(self, prediction, truth):
+        return self.loss(prediction, truth)
 
     def __str__(self):
         return self.name

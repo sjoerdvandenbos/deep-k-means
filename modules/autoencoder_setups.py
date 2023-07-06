@@ -7,7 +7,11 @@ from modules.misc import LSTMDecoderEmpty, LSTMDecoderMixedTeacherForcing, DualL
 
 def get_ae_setup(setup_objective, ae_name, height, width, embedding_size, n_channels, ae_loss, n_layers,
                  decoder_input_type, teacher_forcing_probability, n_batches):
-    if setup_objective == "RECONSTRUCTION" and "LSTM" in ae_name:
+    if ae_name == "VARIATIONAL_AUTOENCODER":
+        return VariationalAutoencoderSetup(setup_objective, ae_name, height, width, embedding_size, n_channels, ae_loss)
+    elif ae_name == "CONVO_AUTOENCODER_1D":
+        return Conv1DAutoencoderSetup(setup_objective, ae_name, height, width, embedding_size, n_channels, ae_loss)
+    elif setup_objective == "RECONSTRUCTION" and "LSTM" in ae_name:
         return LSTMReconstructionSetup(setup_objective, ae_name, height, embedding_size, ae_loss, n_layers,
                                        decoder_input_type,
                                        teacher_forcing_probability, n_batches)
@@ -61,8 +65,39 @@ class AutoencoderSetup(nn.Module):
         return f"{self.objective}_{self.name}"
 
     @staticmethod
-    def step():
-        pass
+    def get_input_format():
+        return "DEFAULT"
+
+
+class Conv1DAutoencoderSetup(AutoencoderSetup):
+    def __init__(self, setup_objective, ae_name, height, width, embedding_size, n_channels, ae_loss):
+        super().__init__(setup_objective, ae_name, height, width, embedding_size, n_channels, ae_loss)
+
+    def forward(self, x):
+        batch_size, _, height, width = x.shape
+        formatted = x.view(batch_size, height, width)
+        embeds, reconstruction = self.autoencoder(formatted)
+        return embeds, reconstruction.view(batch_size, 1, height, width)
+
+
+class VariationalAutoencoderSetup(AutoencoderSetup):
+    def __init__(self, setup_objective, ae_name, height, width, embedding_size, n_channels, ae_loss):
+        super().__init__(setup_objective, ae_name, height, width, embedding_size, n_channels, ae_loss)
+
+    # def forward(self, x):
+    #     # embeds, reconstruction, means, log_var = self.autoencoder(x)
+    #     # return embeds, reconstruction
+    #     return self.autoencoder(x)
+
+    def generate(self, n_samples):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        rand_embeds = torch.randn((n_samples, self.embedding_size), device=device)
+        return self.autoencoder.decode(rand_embeds)
+
+    def get_autoencoder_loss(self, prediction, original_input, means, log_var):
+        kl_divergence = -0.5 * torch.mean(1 + log_var - means.square() - log_var.exp())
+        # kl_divergence = prediction.mean()
+        return super().get_autoencoder_loss(prediction, original_input) + 0.35*kl_divergence
 
 
 class LSTMAutoencoderSetup(nn.Module):
@@ -97,7 +132,7 @@ class LSTMAutoencoderSetup(nn.Module):
         return self.ae_loss(prediction, original_input)
 
     def set_new_autoencoder(self):
-        encoder = nn.LSTM(self.height + 1, self.height, batch_first=True, num_layers=self.n_layers, dropout=0.5)
+        encoder = nn.LSTM(self.height, self.height, batch_first=True, num_layers=self.n_layers, dropout=0.5)
         decoder = self.get_decoder()
         self.autoencoder = get_lstm_autoencoder(
             self.name,
@@ -109,17 +144,17 @@ class LSTMAutoencoderSetup(nn.Module):
 
     def get_decoder(self):
         if self.decoder_input_type == "EMPTY":
-            return LSTMDecoderEmpty(self.height + 1, self.height, batch_first=True, num_layers=self.n_layers,
+            return LSTMDecoderEmpty(self.height, self.height, batch_first=True, num_layers=self.n_layers,
                                     dropout=0.5)
         elif self.decoder_input_type == "RECURSIVE":
-            return LSTMDecoderMixedTeacherForcing(self.height + 1, self.height, batch_first=True, num_layers=self.n_layers,
+            return LSTMDecoderMixedTeacherForcing(self.height, self.height, batch_first=True, num_layers=self.n_layers,
                                                   dropout=0.5, teacher_forcing_probability=0.0)
         elif self.decoder_input_type == "TEACHER_FORCING":
-            return LSTMDecoderMixedTeacherForcing(self.height + 1, self.height, batch_first=True,
+            return LSTMDecoderMixedTeacherForcing(self.height, self.height, batch_first=True,
                                                   num_layers=self.n_layers,
                                                   dropout=0.5, teacher_forcing_probability=1.0)
         elif self.decoder_input_type == "MIXED_TEACHER_FORCING":
-            return LSTMDecoderMixedTeacherForcing(self.height + 1, self.height, batch_first=True,
+            return LSTMDecoderMixedTeacherForcing(self.height, self.height, batch_first=True,
                                                   num_layers=self.n_layers,
                                                   teacher_forcing_probability=self.teacher_forcing_probability)
         else:
@@ -128,8 +163,8 @@ class LSTMAutoencoderSetup(nn.Module):
             raise
 
     @staticmethod
-    def step():
-        pass
+    def get_input_format():
+        return "RNN"
 
     def __str__(self):
         base_str = f"Autoencoder_name: {self.name}, Autoencoder loss: {self.ae_loss}, Embedding_size: " \
@@ -152,11 +187,9 @@ class LSTMReconstructionSetup(LSTMAutoencoderSetup):
     def forward(self, x):
         batch_size, _, height, signal_length = x.shape
         rnn_format = x.view(batch_size, height, signal_length).permute(0, 2, 1)
-        lstm_input = self.add_ones_feature(batch_size, signal_length, rnn_format)
         # Encoder spans the entire length of the sequence
-        encoder_input = lstm_input
-        decoder_input = lstm_input.flip(1)[:, :self.decoder_length, :]
-        embeds, prediction = self.autoencoder(encoder_input, decoder_input)
+        decoder_input = rnn_format.flip(1)[:, :self.decoder_length, :]
+        embeds, prediction = self.autoencoder(rnn_format, decoder_input)
         return embeds, prediction
 
     def get_autoencoder_loss(self, reconstruction, original_input):
@@ -175,10 +208,9 @@ class LSTMPredictionSetup(LSTMAutoencoderSetup):
         batch_size, _, height, signal_length = x.shape
         encoder_length = self.get_encoder_length(signal_length)
         rnn_format = x.view(batch_size, height, signal_length).permute(0, 2, 1)
-        lstm_input = self.add_ones_feature(batch_size, signal_length, rnn_format)
         # Encoder spans the sequence_length - decoder_length
-        encoder_input = lstm_input[:, :encoder_length, :]
-        decoder_input = lstm_input[:, encoder_length:, :]
+        encoder_input = rnn_format[:, :encoder_length, :]
+        decoder_input = rnn_format[:, encoder_length:, :]
         embeds, prediction = self.autoencoder(encoder_input, decoder_input)
         return embeds, prediction
 
@@ -200,25 +232,28 @@ class LSTMHybridSetup(LSTMAutoencoderSetup):
         batch_size, _, height, signal_length = x.shape
         encoder_length = self.get_encoder_length(signal_length)
         rnn_format = x.view(batch_size, height, signal_length).permute(0, 2, 1)
-        lstm_input = self.add_ones_feature(batch_size, signal_length, rnn_format)
         # The encoder spans the sequence_length - decoder_length just like with the prediction setup
-        encoder_part = lstm_input[:, :encoder_length, :]
-        reconstruction_part = lstm_input.flip(1)[:, self.decoder_length:2*self.decoder_length, :]
-        prediction_part = lstm_input[:, encoder_length:, :]
+        encoder_part = rnn_format[:, :encoder_length, :]
+        reconstruction_part = rnn_format.flip(1)[:, self.decoder_length:2*self.decoder_length, :]
+        prediction_part = rnn_format[:, encoder_length:, :]
         decoder_part = torch.cat((reconstruction_part, prediction_part), dim=1)
         embeds, prediction_and_reconstruction = self.autoencoder(encoder_part, decoder_part)
         return embeds, prediction_and_reconstruction
 
     def get_autoencoder_loss(self, catted_decoder_output, original_input):
         # The last encoder input is at total_length - decoder_length
-        encoder_length = self.get_encoder_length(original_input.shape[3])
-        reconstruction_truth = original_input.flip(3)[:, :, :, self.decoder_length:2*self.decoder_length]
-        prediction_truth = original_input[:, :, :, encoder_length:]
+        reconstruction_truth, prediction_truth = self.get_hybrid_target(original_input)
         reconstruction = catted_decoder_output[:, :, :, :self.decoder_length]
         prediction = catted_decoder_output[:, :, :, self.decoder_length:]
         reconstruction_loss = self.ae_loss(reconstruction, reconstruction_truth)
         prediction_loss = self.ae_loss(prediction, prediction_truth)
         return reconstruction_loss + self.hyperparameter * prediction_loss
+
+    def get_hybrid_target(self, original_input):
+        encoder_length = self.get_encoder_length(original_input.shape[3])
+        reconstruction_truth = original_input.flip(3)[:, :, :, self.decoder_length:2 * self.decoder_length]
+        prediction_truth = original_input[:, :, :, encoder_length:]
+        return reconstruction_truth, prediction_truth
 
     def set_new_autoencoder(self):
         encoder = nn.LSTM(self.height, self.height, batch_first=True, num_layers=self.n_layers, dropout=0.5)
